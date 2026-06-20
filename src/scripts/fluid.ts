@@ -49,9 +49,9 @@ out vec4 fragColor;
 // shared "speech-like" oscilloscope signal (used by the waveform passes and the display trace)
 const WSIG = `
 float wcarrier(float x, float t){
-  return 0.55 * sin(x * 50.0  - t * 1.4)
-       + 0.30 * sin(x * 82.0  - t * 2.3 + 1.3)
-       + 0.18 * sin(x * 125.0 - t * 3.4 + 0.6);
+  return 0.55 * sin(x * 280.0 - t * 2.2)
+       + 0.30 * sin(x * 470.0 - t * 3.6 + 1.3)
+       + 0.18 * sin(x * 730.0 - t * 5.2 + 0.6);
 }
 float wenv(float x, float t){               // syllable/word envelope → loud bursts + silences
   float s = x * 3.4 - t * 0.5;
@@ -383,7 +383,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   const gradP = prog(GRADSUB, { uPressure: { value: null }, uVelocity: { value: null }, uTexel: { value: texelSim } });
   const prefilter = prog(PREFILTER, { uTexture: { value: null }, uThreshold: { value: 0.20 }, uKnee: { value: 0.12 } });
   const blur = prog(BLUR, { uTexture: { value: null }, uDir: { value: [0, 0] } });
-  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 }, uWaveAmt: { value: 0 }, uWaveAmp: { value: 0.14 }, uWaveBand: { value: 0.00004 }, uWaveCol: { value: [0.5, 0.72, 1.0] } });
+  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 }, uWaveAmt: { value: 0 }, uWaveAmp: { value: 0.11 }, uWaveBand: { value: 0.00004 }, uWaveCol: { value: [0.5, 0.72, 1.0] } });
   const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 2.5 }, uScale: { value: 1.4 } });
 
   function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
@@ -402,8 +402,8 @@ function startSim(canvas: HTMLCanvasElement): void {
   function lapis(j: number): [number, number, number] { return [LAPIS[0] * j, LAPIS[1] * j, LAPIS[2] * j]; }
 
   // ---- motif emission programs (waveform + ripples) ----
-  const waveDye = prog(WAVE_DYE, { uSource: { value: null }, uTime: { value: 0 }, uAmp: { value: 0.14 }, uBand: { value: 0.0016 }, uWeight: { value: 0 }, uColor: { value: LAPIS } });
-  const waveVel = prog(WAVE_VEL, { uVelocity: { value: null }, uTime: { value: 0 }, uAmp: { value: 0.14 }, uBand: { value: 0.002 }, uForce: { value: 120 }, uWeight: { value: 0 } });
+  const waveDye = prog(WAVE_DYE, { uSource: { value: null }, uTime: { value: 0 }, uAmp: { value: 0.11 }, uBand: { value: 0.0016 }, uWeight: { value: 0 }, uColor: { value: LAPIS } });
+  const waveVel = prog(WAVE_VEL, { uVelocity: { value: null }, uTime: { value: 0 }, uAmp: { value: 0.11 }, uBand: { value: 0.002 }, uForce: { value: 120 }, uWeight: { value: 0 } });
   const ripVel = prog(RIPPLE_VEL, { uVelocity: { value: null }, uTime: { value: 0 }, uWeight: { value: 0 }, uForce: { value: 60 }, uAspect: { value: 1 }, uC0: { value: [0.3, 0.5] }, uC1: { value: [0.6, 0.4] }, uC2: { value: [0.5, 0.7] } });
   const ripDye = prog(RIPPLE_DYE, { uSource: { value: null }, uTime: { value: 0 }, uWeight: { value: 0 }, uAspect: { value: 1 }, uColor: { value: LAPIS }, uC0: { value: [0.3, 0.5] }, uC1: { value: [0.6, 0.4] }, uC2: { value: [0.5, 0.7] } });
   const neuralEdge = prog(NEURAL_EDGE, { uSource: { value: null }, uWeight: { value: 0 }, uAspect: { value: 1 }, uColor: { value: LAPIS }, uN0: { value: [0, 0] }, uN1: { value: [0, 0] }, uN2: { value: [0, 0] }, uN3: { value: [0, 0] }, uN4: { value: [0, 0] }, uN5: { value: [0, 0] }, uN6: { value: [0, 0] } });
@@ -469,10 +469,11 @@ function startSim(canvas: HTMLCanvasElement): void {
   }
 
   // waveform (hero) — a speech-like oscilloscope line dissolving into smoke
-  function emitWaveform(w: number, T: number, fr: number) {
-    waveDye.u.uTime.value = T; waveDye.u.uWeight.value = w * 0.07 * fr; waveDye.u.uSource.value = dye.read.texture;
+  function emitWaveform(w: number, T: number, fr: number, b: number) {
+    const wb = w * b;   // snap in (b≈1) → then dissolve (b→0): deposit + a velocity kick at the snap
+    waveDye.u.uTime.value = T; waveDye.u.uWeight.value = wb * 0.16 * fr; waveDye.u.uSource.value = dye.read.texture;
     pass(waveDye, dye.write); dye.swap();
-    waveVel.u.uTime.value = T; waveVel.u.uWeight.value = w * fr; waveVel.u.uVelocity.value = velocity.read.texture;
+    waveVel.u.uTime.value = T; waveVel.u.uWeight.value = wb * 1.4 * fr; waveVel.u.uVelocity.value = velocity.read.texture;
     pass(waveVel, velocity.write); velocity.swap();
   }
 
@@ -546,13 +547,14 @@ function startSim(canvas: HTMLCanvasElement): void {
     if (T > nextSwitchT) { activeMotif = pickMotif(activeMotif); nextSwitchT = T + 16 + Math.random() * 10; }
     const wr = 1 - Math.exp(-dt / 3.0);
     for (let i = 0; i < MOTIFS.length; i++) { const k = MOTIFS[i]; W[k] += ((k === activeMotif ? 1 : 0) - W[k]) * wr; }
+    const wburst = Math.exp(-((T % 3.2) / 3.2) * 4.0);   // waveform: snap in, then dissolve into the fluid
     // ---- broad ambient flow — eased back under structured motifs so their shape survives ----
     forceP.u.uVelocity.value = velocity.read.texture; forceP.u.uTime.value = T;
     forceP.u.uAmt.value = 2.5 * (1 - 0.82 * W.waveform - 0.55 * W.ripples - 0.72 * W.neural);
     pass(forceP, velocity.write); velocity.swap();
     // ---- per-motif emission ----
     if (W.drift > 0.01) emitDrift(W.drift, T, fr);
-    if (W.waveform > 0.01) emitWaveform(W.waveform, T, fr);
+    if (W.waveform > 0.01) emitWaveform(W.waveform, T, fr, wburst);
     if (W.ripples > 0.01) emitRipples(W.ripples, T, fr);
     if (W.neural > 0.01) emitNeural(W.neural, T, dt, fr);
     if (W.diffusion > 0.01) emitDiffusion(W.diffusion, dt);
@@ -591,7 +593,7 @@ function startSim(canvas: HTMLCanvasElement): void {
     display.u.uDye.value = dye.read.texture; display.u.uBloom.value = bloom.read.texture;
     display.u.uReveal.value = Math.min(1, display.u.uReveal.value + dt / 1.2);
     display.u.uTime.value = T;
-    display.u.uWaveAmt.value = W.waveform * 0.85;
+    display.u.uWaveAmt.value = W.waveform * wburst * 0.95;
     pass(display, null);
 
     if (!canvas.classList.contains('is-live')) canvas.classList.add('is-live');
