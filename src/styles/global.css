@@ -18,11 +18,12 @@
   font-display: swap;
 }
 @font-face {
+  /* metric-matched fallback (measured from the Geist woff2) → near-zero CLS on swap */
   font-family: 'Geist Fallback';
   src: local('Arial'), local('Helvetica Neue'), local('Helvetica');
-  size-adjust: 97%;
-  ascent-override: 93%;
-  descent-override: 23%;
+  size-adjust: 102.21%;
+  ascent-override: 100.5%;
+  descent-override: 29.5%;
   line-gap-override: 0%;
 }
 
@@ -71,6 +72,10 @@ body {
   background-image: var(--poster);
   height: 100dvh;
   overflow: hidden;                 /* single first-view page — no scroll */
+  -webkit-user-select: none;
+  user-select: none;                /* no text selection → no blue drag-overlay, no click jank */
+  -webkit-touch-callout: none;
+  touch-action: manipulation;       /* kill the 300ms tap delay; page never scrolls anyway */
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   font-feature-settings: 'kern' 1;
