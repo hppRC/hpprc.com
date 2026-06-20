@@ -252,7 +252,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   const gradP = prog(GRADSUB, { uPressure: { value: null }, uVelocity: { value: null }, uTexel: { value: texelSim } });
   const prefilter = prog(PREFILTER, { uTexture: { value: null }, uThreshold: { value: 0.20 }, uKnee: { value: 0.12 } });
   const blur = prog(BLUR, { uTexture: { value: null }, uDir: { value: [0, 0] } });
-  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 0.85 } });
+  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 } });
 
   function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
     renderer.render({ scene: p.mesh, target: target ?? undefined });
@@ -265,17 +265,11 @@ function startSim(canvas: HTMLCanvasElement): void {
   }
 
   // ---- colour: cool-leaning, dim → smoky, not neon ----
-  function hsv(h: number, s: number, v: number): [number, number, number] {
-    const i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
-    const m = [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][i % 6];
-    return [m[0], m[1], m[2]];
-  }
-  function genColor(): [number, number, number] {
-    const h = (0.5 + Math.random() * 0.42) % 1; // cyan → blue → violet → magenta
-    const c = hsv(h, 0.7 + Math.random() * 0.25, 1);
-    return [c[0] * 0.30, c[1] * 0.30, c[2] * 0.30];
-  }
-  let curColor = genColor();
+  // Ruri (lapis) blue only
+  const LAPIS: [number, number, number] = [0.13, 0.26, 0.46];
+  function lapis(j: number): [number, number, number] { return [LAPIS[0] * j, LAPIS[1] * j, LAPIS[2] * j]; }
+  // a single always-on emitter: follows the cursor when present, else a slow regular orbit
+  let emitX = 0.5, emitY = 0.5, prevEmitX = 0.5, prevEmitY = 0.5;
 
   const input = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, moved: false, down: false, tap: false, downX: 0, downY: 0, downT: 0, lastMove: -1e4 };
   const PT: [number, number] = [0, 0];
@@ -292,13 +286,13 @@ function startSim(canvas: HTMLCanvasElement): void {
 
   function toUV(clientX: number, clientY: number): [number, number] { return [clientX / window.innerWidth, 1 - clientY / window.innerHeight]; }
   window.addEventListener('pointermove', (e) => { if (!e.isPrimary) return; const [ux, uy] = toUV(e.clientX, e.clientY); input.x = ux; input.y = uy; input.moved = true; input.lastMove = performance.now(); }, { passive: true });
-  window.addEventListener('pointerdown', (e) => { if (!e.isPrimary) return; const [ux, uy] = toUV(e.clientX, e.clientY); input.x = input.px = ux; input.y = input.py = uy; input.down = true; input.downX = e.clientX; input.downY = e.clientY; input.downT = performance.now(); input.lastMove = performance.now(); curColor = genColor(); }, { passive: true });
+  window.addEventListener('pointerdown', (e) => { if (!e.isPrimary) return; const [ux, uy] = toUV(e.clientX, e.clientY); input.x = input.px = ux; input.y = input.py = uy; input.down = true; input.downX = e.clientX; input.downY = e.clientY; input.downT = performance.now(); input.lastMove = performance.now(); }, { passive: true });
   window.addEventListener('pointerup', (e) => { if (!e.isPrimary) return; if (input.down && Math.hypot(e.clientX - input.downX, e.clientY - input.downY) < 10 && performance.now() - input.downT < 250) input.tap = true; input.down = false; }, { passive: true });
 
   const SPLAT_FORCE = 6400;
   let visible = !document.hidden, inView = true, raf = 0;
   const t0 = performance.now();
-  let prev = t0, lastAuto = 0;
+  let prev = t0;
 
   function step(now: number) {
     raf = requestAnimationFrame(step);
@@ -306,24 +300,30 @@ function startSim(canvas: HTMLCanvasElement): void {
     dt = Math.min(Math.max(dt, 1 / 120), 1 / 30);
     const T = (now - t0) / 1000;
 
-    // ---- inputs ----
-    if (input.moved) {
-      const dx = (input.x - input.px) * SPLAT_FORCE, dy = (input.y - input.py) * SPLAT_FORCE;
-      doSplat(input.x, input.y, dx, dy, curColor);
-      input.px = input.x; input.py = input.y; input.moved = false;
+    // ---- one always-on emitter (cursor strength) — follows the cursor, else a slow regular orbit ----
+    const active = (now - input.lastMove) < 650;
+    let tgtX: number, tgtY: number;
+    if (active) { tgtX = input.x; tgtY = input.y; }
+    else {
+      tgtX = 0.5 + 0.30 * Math.cos(T * 0.17) + 0.08 * Math.cos(T * 0.39 + 1.3);
+      tgtY = 0.5 + 0.24 * Math.sin(T * 0.14) + 0.06 * Math.sin(T * 0.33 + 0.7);
     }
-    if (input.tap) {
-      const c = genColor();
-      for (let i = 0; i < 6; i++) { const ang = (i / 6) * Math.PI * 2; doSplat(input.x, input.y, Math.cos(ang) * SPLAT_FORCE * 0.4, Math.sin(ang) * SPLAT_FORCE * 0.4, c); }
-      input.tap = false;
+    const follow = 1 - Math.exp(-(active ? 18.0 : 7.0) * dt);
+    emitX += (tgtX - emitX) * follow;
+    emitY += (tgtY - emitY) * follow;
+    const evx = emitX - prevEmitX, evy = emitY - prevEmitY;
+    prevEmitX = emitX; prevEmitY = emitY;
+    const fr = Math.min(dt * 60, 2);
+    const sp = Math.hypot(evx, evy);
+    let fx: number, fy: number;
+    if (active) { fx = evx * SPLAT_FORCE * 1.6; fy = evy * SPLAT_FORCE * 1.6; }
+    else {
+      const ux = sp > 1e-6 ? evx / sp : 1, uy = sp > 1e-6 ? evy / sp : 0;
+      fx = (ux * 0.7 - uy * 0.7) * 150;     // consistent gentle stir + swirl along the orbit
+      fy = (uy * 0.7 + ux * 0.7) * 150;
     }
-    // autonomous life: gentle moving splats keep ambient smoke alive at all times
-    if (T - lastAuto > 0.38) {
-      lastAuto = T;
-      const x = Math.random(), y = Math.random();
-      const ang = Math.random() * Math.PI * 2, mag = 650 + Math.random() * 1100;
-      doSplat(x, y, Math.cos(ang) * mag, Math.sin(ang) * mag, genColor());
-    }
+    doSplat(emitX, emitY, fx, fy, lapis(0.085 * fr)); // continuous, slow-building, long-lasting
+    input.moved = false;
 
     // ---- fluid step ----
     curlP.u.uVelocity.value = velocity.read.texture; pass(curlP, curl);
@@ -335,9 +335,9 @@ function startSim(canvas: HTMLCanvasElement): void {
     for (let i = 0; i < N; i++) { press.u.uPressure.value = pressure.read.texture; pass(press, pressure.write); pressure.swap(); }
     gradP.u.uPressure.value = pressure.read.texture; gradP.u.uVelocity.value = velocity.read.texture; pass(gradP, velocity.write); velocity.swap();
     advect.u.uTexel.value = texelSim; advect.u.uDt.value = dt;
-    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = velocity.read.texture; advect.u.uDissipation.value = 0.18;
+    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = velocity.read.texture; advect.u.uDissipation.value = 0.10;
     pass(advect, velocity.write); velocity.swap();
-    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDissipation.value = 0.5;
+    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDissipation.value = 0.16;
     pass(advect, dye.write); dye.swap();
 
     // ---- bloom (prefilter → separable blur) ----
@@ -364,7 +364,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   resize();
   window.addEventListener('resize', resize, { passive: true });
   // seed a few smoky splats so the field isn't empty on first paint
-  for (let i = 0; i < 8; i++) { const ang = Math.random() * Math.PI * 2; doSplat(Math.random(), Math.random(), Math.cos(ang) * 900, Math.sin(ang) * 900, genColor()); }
+  for (let i = 0; i < 6; i++) { const ang = Math.random() * Math.PI * 2; doSplat(Math.random(), Math.random(), Math.cos(ang) * 800, Math.sin(ang) * 800, lapis(0.6)); }
   document.addEventListener('visibilitychange', () => { visible = !document.hidden; gate(); });
   if ('IntersectionObserver' in window) new IntersectionObserver(([e]) => { inView = e.isIntersecting; gate(); }, { threshold: 0 }).observe(canvas);
   canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); if (raf) cancelAnimationFrame(raf); raf = 0; });
