@@ -1,90 +1,20 @@
 ---
 import Base from '../layouts/Base.astro';
 
-// NOTE: identity facts grounded against github.com/hppRC, Google Scholar, arXiv.
-// Items marked TODO need Hayato's confirmation before launch.
-
+// hpprc.com is a single first-view page. Everything else lives at hpprc.dev.
 const links = [
   { label: 'GitHub', href: 'https://github.com/hppRC' },
   { label: 'Scholar', href: 'https://scholar.google.com/citations?user=3xeQ7VYAAAAJ' },
   { label: 'Hugging Face', href: 'https://huggingface.co/hpprc' },
-  { label: 'X', href: 'https://x.com/hayato_tkgs' }, // TODO confirm: @hayato_tkgs vs @hpp_ricecake
-  { label: 'Speaker Deck', href: 'https://speakerdeck.com/hpprc' },
+  { label: 'X', href: 'https://x.com/hayato_tkgs' }, // TODO confirm handle
+  { label: 'hpprc.dev ↗', href: 'https://hpprc.dev' },
 ];
-
-// Selected work — curated; co-author lists kept minimal, his name bolded.
-// TODO confirm exact co-authors, order, and add exact ACL Anthology URLs.
-const pubs = [
-  {
-    title: 'DefSent: Sentence Embeddings using Definition Sentences',
-    authors: ['**Hayato Tsukagoshi**', 'Ryohei Sasano', 'Koichi Takeda'],
-    venue: 'ACL-IJCNLP 2021',
-    links: [{ label: 'code', href: 'https://github.com/hppRC/defsent' }],
-  },
-  {
-    title: 'Japanese SimCSE: Technical Report',
-    authors: ['**Hayato Tsukagoshi**', 'Ryohei Sasano', 'Koichi Takeda'],
-    venue: 'arXiv·2023',
-    links: [
-      { label: 'arXiv', href: 'https://arxiv.org/abs/2310.19349' },
-      { label: 'code', href: 'https://github.com/hppRC/simple-simcse-ja' },
-    ],
-  },
-  {
-    title: 'Ruri: Japanese General Text Embeddings',
-    authors: ['**Hayato Tsukagoshi**', 'Ryohei Sasano'],
-    venue: 'arXiv·2024',
-    links: [
-      { label: 'arXiv', href: 'https://arxiv.org/abs/2409.07737' },
-      { label: 'models', href: 'https://huggingface.co/cl-nagoya' },
-    ],
-  },
-  {
-    title: 'Sentence Representations via Gaussian Embedding',
-    authors: ['**Hayato Tsukagoshi**', 'Ryohei Sasano'],
-    venue: 'EACL 2024',
-    links: [], // TODO: ACL Anthology URL
-  },
-  {
-    title: 'Improving Sentence Embeddings with Automatic Generation of Training Data Using Few-shot Examples',
-    authors: ['**Hayato Tsukagoshi**', 'Ryohei Sasano'],
-    venue: 'ACL 2024 · SRW',
-    links: [], // TODO: ACL Anthology URL
-  },
-  {
-    title: 'WikiSplit++: Easy Data Refinement for Split and Rephrase',
-    authors: ['**Hayato Tsukagoshi**', 'et al.'], // TODO co-authors
-    venue: 'LREC-COLING 2024',
-    links: [], // TODO: ACL Anthology URL
-  },
-  {
-    title: 'Redundancy, Isotropy, and Intrinsic Dimensionality of Prompt-based Text Embeddings',
-    authors: ['**Hayato Tsukagoshi**', 'et al.'], // TODO co-authors
-    venue: 'Findings of ACL 2025',
-    links: [], // TODO: ACL Anthology URL
-  },
-];
-
-const projects = [
-  { name: 'cl-nagoya/ruri', desc: 'Japanese general-purpose text embedding models.', links: [{ label: 'Hugging Face', href: 'https://huggingface.co/cl-nagoya' }, { label: 'arXiv', href: 'https://arxiv.org/abs/2409.07737' }] },
-  { name: 'simple-simcse-ja', desc: 'A minimal, reproducible SimCSE implementation for Japanese.', links: [{ label: 'GitHub', href: 'https://github.com/hppRC/simple-simcse-ja' }] },
-  { name: 'defsent', desc: 'Sentence embeddings from definition sentences.', links: [{ label: 'GitHub', href: 'https://github.com/hppRC/defsent' }] },
-  { name: 'bert-classification-tutorial', desc: 'A clean, modern BERT text-classification tutorial.', links: [{ label: 'GitHub', href: 'https://github.com/hppRC/bert-classification-tutorial' }] },
-  { name: 'llm-lora-classification', desc: 'Text classification with LLMs and LoRA.', links: [{ label: 'GitHub', href: 'https://github.com/hppRC/llm-lora-classification' }] },
-];
-
-function renderAuthors(authors: string[]) {
-  return authors
-    .map((a) => (a.startsWith('**') ? `<b>${a.slice(2, -2)}</b>` : a))
-    .join(', ');
-}
 ---
 
 <Base>
-  <main>
-    <!-- ============================ HERO ============================ -->
-    <header class="hero wrap" id="top">
-      <h1 class="hero-name"><span class="hero-clip">Hayato Tsukagoshi</span></h1>
+  <main class="hero">
+    <div class="hero-inner">
+      <h1 class="hero-name">Hayato Tsukagoshi</h1>
       <p class="hero-role reveal">
         ML Engineer, Kotoba Technologies<span class="sep">/</span>PhD candidate, Nagoya University
       </p>
@@ -92,107 +22,13 @@ function renderAuthors(authors: string[]) {
         Researching sentence embeddings and text representation learning — now bringing
         that work to speech AI.
       </p>
-      <nav class="hero-links reveal" aria-label="Profiles">
+      <nav class="hero-links reveal" aria-label="Links">
         {links.map((l) => <a class="link" href={l.href} rel="me noopener" target="_blank">{l.label}</a>)}
+        <!-- TODO confirm public email -->
+        <button class="link copied" id="email" type="button"
+          data-user="research.tsukagoshi.hayato" data-domain="gmail.com" aria-label="Reveal email">Email</button>
       </nav>
       <p class="hero-cap reveal">latent flow · advection — diffusion</p>
-    </header>
-
-    <!-- ========================== STATEMENT ========================= -->
-    <section id="statement" class="reveal">
-      <div class="wrap">
-        <p class="kicker"><span class="num">01</span> Statement</p>
-        <p class="statement">
-          <b>Hayato Tsukagoshi</b> is a machine-learning researcher focused on
-          <b>sentence embeddings</b> and representation learning for Japanese and
-          multilingual NLP. He is a PhD candidate at Nagoya University and an ML engineer
-          at <b>Kotoba Technologies</b>, where he applies that background to speech AI —
-          automatic speech recognition, text-to-speech, and speech-to-speech translation.
-        </p>
-      </div>
-    </section>
-
-    <!-- ========================= SELECTED WORK ====================== -->
-    <section id="work" class="reveal">
-      <div class="wrap">
-        <p class="kicker"><span class="num">02</span> Selected Work</p>
-        <ol class="pubs">
-          {pubs.map((p, i) => (
-            <li class="pub">
-              <span class="pub-num">{String(i + 1).padStart(2, '0')}</span>
-              <div>
-                <p class="pub-title">{p.title}</p>
-                <p class="pub-meta">
-                  <Fragment set:html={renderAuthors(p.authors)} /> — <span class="venue">{p.venue}</span>
-                </p>
-                {p.links.length > 0 && (
-                  <p class="pub-links">
-                    {p.links.map((l) => <a class="link link--mute" href={l.href} target="_blank" rel="noopener">{l.label}</a>)}
-                  </p>
-                )}
-              </div>
-            </li>
-          ))}
-        </ol>
-        <p class="pubs-full">
-          <a class="link link--mute" href="https://scholar.google.com/citations?user=3xeQ7VYAAAAJ" target="_blank" rel="noopener">Full list on Google Scholar →</a>
-        </p>
-      </div>
-    </section>
-
-    <!-- ========================== PROJECTS ========================== -->
-    <section id="projects" class="reveal">
-      <div class="wrap">
-        <p class="kicker"><span class="num">03</span> Projects</p>
-        <ul class="projects">
-          {projects.map((pr) => (
-            <li class="project">
-              <p class="project-name">{pr.name}</p>
-              <p class="project-desc">{pr.desc}</p>
-              <p class="project-links">
-                {pr.links.map((l) => <a class="link link--mute" href={l.href} target="_blank" rel="noopener">{l.label}</a>)}
-              </p>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </section>
-
-    <!-- ========================== ELSEWHERE ========================= -->
-    <section id="contact" class="reveal">
-      <div class="wrap">
-        <p class="kicker"><span class="num">04</span> Elsewhere</p>
-        <p class="contact-line">
-          Reach out, or read the full profile and CV at
-          <a class="link" href="https://hpprc.dev" target="_blank" rel="me noopener">hpprc.dev</a>.
-        </p>
-        <nav class="colophon-links" aria-label="Links">
-          {links.map((l) => <a class="link link--mute" href={l.href} target="_blank" rel="me noopener">{l.label}</a>)}
-          <!-- TODO confirm public email address before launch -->
-          <button class="link link--mute copied" id="email" type="button"
-            data-user="research.tsukagoshi.hayato" data-domain="gmail.com" aria-label="Reveal email">Email</button>
-        </nav>
-      </div>
-    </section>
-
-    <!-- =========================== FOOTER =========================== -->
-    <footer class="foot wrap">
-      <p class="foot-meta">
-        <span>© 2026 Hayato Tsukagoshi</span>
-        <span>Geist · Geist Mono</span>
-        <span>Built with Astro</span>
-      </p>
-      <p class="foot-note">
-        Background: a slow flow field — advection and diffusion, like an embedding settling
-        into place.
-      </p>
-    </footer>
+    </div>
   </main>
-
-  <nav class="cindex" aria-label="Sections">
-    <a href="#statement" data-sec="statement">01</a>
-    <a href="#work" data-sec="work">02</a>
-    <a href="#projects" data-sec="projects">03</a>
-    <a href="#contact" data-sec="contact">04</a>
-  </nav>
 </Base>

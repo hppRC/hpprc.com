@@ -59,15 +59,25 @@ const fragment = /* glsl */ `
     vec2 p = vUv - 0.5;
     p.x *= res.x / res.y;            // aspect-correct
 
-    float t = uTime * 0.035;
+    float t = uTime * 0.06;          // faster autonomous drift
+
+    // autonomous stir — wandering virtual centers keep the field alive & churning
+    vec2 autoC = vec2(sin(uTime * 0.13) * 0.55, cos(uTime * 0.10) * 0.34);
+    vec2 toA = p - autoC;
+    float aInfl = exp(-dot(toA, toA) * 2.2);
+    vec2 autoSwirl = vec2(-toA.y, toA.x) * aInfl * 0.6;
+    vec2 autoC2 = vec2(cos(uTime * 0.08) * -0.5, sin(uTime * 0.115) * 0.42);
+    vec2 toB = p - autoC2;
+    float bInfl = exp(-dot(toB, toB) * 2.6);
+    autoSwirl += vec2(-toB.y, toB.x) * bInfl * 0.5;
 
     // disturbance center trails the cursor (analytic wake), then settles
     vec2 pc = mix(uPointerLag, uPointer, 0.7);
     vec2 toP = p - pc;
     float pd = length(toP);
     float infl = uPointerOn * exp(-pd * pd * 5.5);
-    vec2 swirl = vec2(-toP.y, toP.x) * infl * (0.25 + 1.2 * uPointerVel);
-    vec2 pull  = -toP * infl * 0.35;
+    vec2 swirl = vec2(-toP.y, toP.x) * infl * (0.35 + 1.6 * uPointerVel);
+    vec2 pull  = -toP * infl * 0.45;
 
     // tap ripples (no extra GPU pass)
     vec2 rDisp = vec2(0.0);
@@ -76,23 +86,24 @@ const fragment = /* glsl */ `
     addRipple(uRippleB, p, uTime, rDisp, rLum);
     addRipple(uRippleC, p, uTime, rDisp, rLum);
 
-    // domain-warped fbm, nudged by pointer field + ripples
-    vec2 q = vec2(fbm(p * 1.6 + vec2(0.0, t)), fbm(p * 1.6 + vec2(5.2, -t * 0.8)));
-    vec2 warp = p * 1.7 + 1.7 * q + swirl + pull * 0.5 + rDisp;
-    vec2 r = vec2(fbm(warp + vec2(1.7, 9.2) + 0.12 * t), fbm(warp + vec2(8.3, 2.8) - 0.1 * t));
-    float f = fbm(p * 2.0 + 2.2 * r + swirl * 1.5 + rDisp);
+    // domain-warped fbm — more motion + larger amplitude than the calm baseline
+    vec2 q = vec2(fbm(p * 1.9 + vec2(0.0, t)), fbm(p * 1.9 + vec2(5.2, -t * 0.9)));
+    vec2 warp = p * 2.0 + 2.3 * q + swirl + pull * 0.5 + rDisp + autoSwirl;
+    vec2 r = vec2(fbm(warp + vec2(1.7, 9.2) + 0.20 * t), fbm(warp + vec2(8.3, 2.8) - 0.16 * t));
+    float f = fbm(p * 2.3 + 2.8 * r + swirl * 1.5 + rDisp + autoSwirl * 0.8);
 
-    float veil = smoothstep(0.28, 0.95, f);
-    veil += infl * 0.22 * uPointerVel;
+    float veil = smoothstep(0.26, 0.86, f);
+    veil += infl * 0.28 * uPointerVel + aInfl * 0.05;
 
-    vec3 base = vec3(0.031, 0.035, 0.043);
-    vec3 graphite = vec3(0.060, 0.068, 0.082);
+    vec3 base = vec3(0.032, 0.037, 0.046);
+    vec3 graphite = vec3(0.085, 0.097, 0.118);
     vec3 col = mix(base, graphite, veil);
 
-    float core = pow(veil, 3.2);
-    col += uLapis * core * 0.10;
-    col += uLapis * infl * (0.05 + 0.18 * uPointerVel);  // lapis whisper trails the cursor
-    col += uLapis * max(rLum, 0.0) * 0.04;               // tap ring whisper (luminance only)
+    float core = pow(veil, 2.6);
+    col += uLapis * core * 0.18;
+    col += uLapis * (aInfl + bInfl) * 0.05;              // autonomous lapis breathing
+    col += uLapis * infl * (0.06 + 0.22 * uPointerVel);  // lapis whisper trails the cursor
+    col += uLapis * max(rLum, 0.0) * 0.05;               // tap ring whisper (luminance only)
 
     // faint embedding-like points advected by the warp
     vec2 g = warp * 9.0;
@@ -101,7 +112,7 @@ const fragment = /* glsl */ `
     float point = dotMask * smoothstep(0.16, 0.0, dd) * (0.3 + 0.7 * veil);
     col += (uLapis * 0.6 + 0.4) * point * 0.05;
 
-    float vig = smoothstep(1.2, 0.35, length(p));
+    float vig = smoothstep(1.32, 0.28, length(p));
     col *= vig;
 
     float grain = hash(vUv * res + fract(uTime) * 97.0) - 0.5;
