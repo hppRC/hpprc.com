@@ -6,7 +6,7 @@ const links = [
   { label: 'GitHub', href: 'https://github.com/hppRC' },
   { label: 'Scholar', href: 'https://scholar.google.com/citations?user=3xeQ7VYAAAAJ' },
   { label: 'Hugging Face', href: 'https://huggingface.co/hpprc' },
-  { label: 'X', href: 'https://x.com/hayato_tkgs' }, // TODO confirm handle
+  { label: 'X', href: 'https://x.com/hayato_tkgs' },
   { label: 'hpprc.dev ↗', href: 'https://hpprc.dev' },
 ];
 ---
@@ -16,11 +16,10 @@ const links = [
     <div class="hero-inner">
       <h1 class="hero-name">Hayato Tsukagoshi</h1>
       <p class="hero-role reveal">
-        ML Engineer, Kotoba Technologies<span class="sep">/</span>PhD candidate, Nagoya University
+        ML Engineer, Kotoba Technologies<span class="sep">/</span>PhD, Nagoya University
       </p>
       <p class="hero-summary reveal">
-        Researching sentence embeddings and text representation learning — now bringing
-        that work to speech AI.
+        Sentence embeddings and representation learning — now turning to speech.
       </p>
       <nav class="hero-links reveal" aria-label="Links">
         {links.map((l) => <a class="link" href={l.href} rel="me noopener" target="_blank">{l.label}</a>)}
