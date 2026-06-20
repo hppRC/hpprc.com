@@ -343,8 +343,8 @@ function startSim(canvas: HTMLCanvasElement): void {
     forceP.u.uVelocity.value = velocity.read.texture; forceP.u.uTime.value = T; pass(forceP, velocity.write); velocity.swap();
     // ---- several big soft sources drifting across the screen → even broad smoke, no gradient wash ----
     for (let i = 0; i < NE; i++) {
-      const ex = ebx[i] + 0.12 * Math.cos(T * 0.058 + eph[i]) + 0.05 * Math.cos(T * 0.135 + eph[i] * 1.7);
-      const ey = eby[i] + 0.10 * Math.sin(T * 0.070 + eph[i]) + 0.04 * Math.sin(T * 0.115 + eph[i] * 1.3);
+      const ex = ebx[i] + 0.24 * Math.cos(T * 0.024 + eph[i]) + 0.10 * Math.cos(T * 0.055 + eph[i] * 1.7);
+      const ey = eby[i] + 0.21 * Math.sin(T * 0.028 + eph[i]) + 0.09 * Math.sin(T * 0.048 + eph[i] * 1.3);
       const dvx = ex - epx[i], dvy = ey - epy[i];
       epx[i] = ex; epy[i] = ey;
       doSplat(ex, ey, dvx * 2200 - dvy * 14, dvy * 2200 + dvx * 14, lapis(0.034 * fr));
