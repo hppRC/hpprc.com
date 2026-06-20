@@ -1,0 +1,13 @@
+{
+  "name": "Hayato Tsukagoshi",
+  "short_name": "Tsukagoshi",
+  "description": "ML Engineer — speech AI & text embeddings.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0b0d",
+  "theme_color": "#0a0b0d",
+  "icons": [
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ]
+}

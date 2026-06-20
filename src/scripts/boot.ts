@@ -1,13 +1,6 @@
-// boot.ts — tiny, ships for everyone. Reveals the first view, wires the email,
-// then gates + DEFERS the WebGL field as a separate code-split chunk.
-
-const hero = document.querySelector<HTMLElement>('.hero');
-
-// ---- run-once first-view reveal ----
-requestAnimationFrame(() => {
-  hero?.classList.add('is-in');
-  document.querySelectorAll<HTMLElement>('.reveal').forEach((el) => el.classList.add('is-in'));
-});
+// boot.ts — tiny, ships for everyone. Wires the email, then gates + DEFERS the
+// WebGL field as a separate code-split chunk. (The first-view reveal runs from a
+// tiny inline script in Base.astro, so it never depends on this bundle loading.)
 
 // ---- email reveal (light obfuscation) ----
 const email = document.getElementById('email') as HTMLButtonElement | null;

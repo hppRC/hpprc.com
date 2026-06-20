@@ -6,13 +6,46 @@ export interface Props {
   description?: string;
 }
 
+const site = 'https://hpprc.com';
 const {
   title = 'Hayato Tsukagoshi',
-  description = 'Hayato Tsukagoshi — ML researcher working on sentence embeddings, text representation learning, and speech AI at Kotoba Technologies.',
+  description =
+    'Hayato Tsukagoshi — ML Engineer at Kotoba Technologies. Pre- and post-training of speech models (TTS, ASR, speech-to-speech) and large-scale training of text embeddings. PhD, Nagoya University.',
 } = Astro.props;
 
-const site = 'https://hpprc.com';
+// keep the social-card title clean (just the name); make the <title> tag descriptive for search
+const pageTitle = title === 'Hayato Tsukagoshi' ? 'Hayato Tsukagoshi — Speech AI & Text Embeddings' : title;
 const canonical = new URL(Astro.url.pathname, site).href;
+const ogImage = `${site}/og.jpg`;
+const ogAlt = 'Hayato Tsukagoshi — ML Engineer, speech AI & text embeddings';
+
+const personLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Person',
+  name: 'Hayato Tsukagoshi',
+  alternateName: '塚越駿',
+  url: site,
+  image: ogImage,
+  jobTitle: 'ML Engineer',
+  worksFor: { '@type': 'Organization', name: 'Kotoba Technologies' },
+  alumniOf: { '@type': 'CollegeOrUniversity', name: 'Nagoya University' },
+  knowsAbout: [
+    'Speech synthesis (TTS)',
+    'Automatic speech recognition (ASR)',
+    'Speech-to-speech translation',
+    'Text embeddings',
+    'Representation learning',
+    'Natural language processing',
+    'Information retrieval',
+  ],
+  sameAs: [
+    'https://github.com/hppRC',
+    'https://scholar.google.com/citations?user=3xeQ7VYAAAAJ',
+    'https://huggingface.co/hpprc',
+    'https://x.com/hpp_ricecake',
+    'https://hpprc.dev',
+  ],
+};
 ---
 
 <!doctype html>
@@ -20,34 +53,63 @@ const canonical = new URL(Astro.url.pathname, site).href;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title}</title>
+    <title>{pageTitle}</title>
     <meta name="description" content={description} />
+    <meta name="author" content="Hayato Tsukagoshi" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
     <link rel="canonical" href={canonical} />
     <meta name="theme-color" content="#0a0b0d" />
     <meta name="color-scheme" content="dark" />
 
-    <!-- Open Graph / Twitter -->
+    <!-- Open Graph -->
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Hayato Tsukagoshi" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
-    <meta property="og:image" content={`${site}/og.jpg`} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={ogAlt} />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X -->
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@hpp_ricecake" />
+    <meta name="twitter:creator" content="@hpp_ricecake" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content={`${site}/og.jpg`} />
+    <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content={ogAlt} />
 
+    <!-- icons + web app manifest -->
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
 
     <!-- preload only the critical (Sans) face; Mono loads post-paint -->
     <link rel="preload" href="/fonts/geist-sans.woff2" as="font" type="font/woff2" crossorigin />
 
-    <!-- progressive enhancement flag: reveals only hide when JS is present -->
+    <script type="application/ld+json" set:html={JSON.stringify(personLd)} />
+
+    <!-- progressive enhancement flag: reveals only animate when JS is present -->
     <script is:inline>document.documentElement.classList.add('js');</script>
   </head>
   <body>
     <canvas id="fluid" aria-hidden="true"></canvas>
     <slot />
+    <!-- run-once reveal, inline so the first view is never blank if the deferred bundle fails to load -->
+    <script is:inline>
+      requestAnimationFrame(function () {
+        var h = document.querySelector('.hero');
+        if (h) h.classList.add('is-in');
+        document.querySelectorAll('.reveal').forEach(function (el) {
+          el.classList.add('is-in');
+        });
+      });
+    </script>
     <script>import '../scripts/boot.ts';</script>
   </body>
 </html>
