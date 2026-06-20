@@ -1,484 +1,389 @@
-// fluid.ts — hero background: ONE single-pass curl/domain-warped flow field that
-// morphs between 5 MOTIFS (ripples / wind / voice waveform / neural net /
-// diffusion), each a re-reading of the same warped-fbm medium. The base field
-// never turns off; every motif is a weighted skin, so any half-morphed frame is
-// valid. The CPU owns the morph (random current→next over time) and seeds a
-// per-visit phase + domain offset so no two visits feel the same. Pointer/touch
-// reactive: a trailing wake, a glowing cursor trail, and tap ripples — all
-// luminance-only, monochrome near-black with a restrained lapis whisper.
-// No FBO, no second pass. Deferred + code-split (loaded only when gated in).
-import { Renderer, Triangle, Program, Mesh } from 'ogl';
+// fluid.ts — hero background: a REAL GPU stable-fluids simulation (WebGL2, FBO
+// ping-pong) that the cursor actually STIRS. The cursor injects velocity + dye
+// into a persistent field; vorticity confinement keeps it chaotic; the field
+// keeps swirling after the cursor leaves. Rendered dark near-black with a
+// restrained lapis whisper — no rainbow, no bloom, no cursor glow. (Stage A:
+// fluid core + autonomous life. Particles + motif regimes layer on next.)
+// Deferred + gated; falls back to the static CSS poster when WebGL2 / float
+// render targets are unavailable.
+import { Renderer, RenderTarget, Program, Mesh, Triangle } from 'ogl';
 
-// glowing cursor trail = N recent path samples as individual vec3 uniforms
-// (OGL doesn't reliably upload a `vec3[]` array uniform, so we unroll them).
-const TRAIL_N = 16;
-const trailDecl = Array.from({ length: TRAIL_N }, (_, i) => `uniform vec3 uTr${i};`).join('\n  ');
-const trailAccum = Array.from({ length: TRAIL_N }, (_, i) => `tp(uTr${i}, p, uTime, uTrailLife, trail);`).join('\n    ');
-
-const vertex = /* glsl */ `
-  attribute vec2 position;
-  attribute vec2 uv;
-  varying vec2 vUv;
-  void main() { vUv = uv; gl_Position = vec4(position, 0.0, 1.0); }
-`;
-
-const fragment = /* glsl */ `
-  precision highp float;
-  varying vec2 vUv;
-  uniform vec2  uResolution;
-  uniform float uTime;
-  uniform float uReveal;
-  uniform vec2  uPointer;
-  uniform vec2  uPointerLag;
-  uniform float uPointerOn;
-  uniform float uPointerVel;
-  uniform vec3  uRippleA;
-  uniform vec3  uRippleB;
-  uniform vec3  uRippleC;
-  uniform float uWaveSpeed;
-  uniform vec3  uLapis;
-  ${trailDecl}
-  uniform float uTrailLife;
-  uniform vec4  uMotif;            // x=ripple y=wind z=voice w=net  (weights 0..1)
-  uniform float uMotifDiff;        // diffusion weight
-  uniform vec2  uWindDir;
-  uniform float uCalm;
-  uniform float uStretch;
-  uniform float uWaveK;
-  uniform float uFlowSpeed;
-  uniform float uSigma;
-  uniform float uNetSparse;
-  uniform float uBands;
-  uniform float uIntensity;
-  uniform vec2  uSeed;
-
-  float hash(vec2 p){ p = fract(p * vec2(123.34, 345.45)); p += dot(p, p + 34.345); return fract(p.x * p.y); }
-  float vnoise(vec2 p){
-    vec2 i = floor(p), f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    float a = hash(i), b = hash(i + vec2(1.0, 0.0)), c = hash(i + vec2(0.0, 1.0)), d = hash(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+// ---- capability probe on a throwaway canvas (so we never wedge the real one) ----
+function simCapable(): boolean {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl2', { alpha: false }) as WebGL2RenderingContext | null;
+    if (!gl) return false;
+    if (!gl.getExtension('EXT_color_buffer_float')) return false;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, 4, 4, 0, gl.RG, gl.HALF_FLOAT, null);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    return gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  } catch {
+    return false;
   }
-  float fbm(vec2 p){
-    float v = 0.0, a = 0.5;
-    for (int i = 0; i < 5; i++) { v += a * vnoise(p); p = p * 2.02 + vec2(11.3, 7.7); a *= 0.5; }
-    return v;
-  }
-  void addRipple(vec3 R, vec2 p, float time, inout vec2 disp, inout float lum){
-    if (R.z < 0.0) return;
-    float age = time - R.z;
-    if (age < 0.0 || age > 1.4) return;
-    float d = length(p - R.xy);
-    float ring = sin((d - age * uWaveSpeed) * 10.0) * exp(-d * 3.0) * (1.0 - smoothstep(0.0, 1.2, age));
-    vec2 dir = d > 1e-4 ? (p - R.xy) / d : vec2(0.0);
-    disp += dir * ring * 0.02;
-    lum += ring;
-  }
-  // one glowing trail sample
-  void tp(vec3 s, vec2 p, float time, float life, inout float tr){
-    if (s.z < 0.0) return;
-    float age = time - s.z;
-    if (age < 0.0 || age > life) return;
-    float w = 1.0 - age / life;
-    tr += exp(-dot(p - s.xy, p - s.xy) * 44.0) * w * w;
-  }
-
-  void main(){
-    vec2 res = uResolution;
-    vec2 p = vUv - 0.5;
-    p.x *= res.x / res.y;
-    float t = uTime * 0.06;
-    vec2 seedOff = uSeed;
-
-    float wR = uMotif.x, wW = uMotif.y, wV = uMotif.z, wN = uMotif.w, wD = uMotifDiff;
-    float wBase = clamp(1.0 - (wR + wW + wV + wN + wD), 0.0, 1.0);
-
-    // autonomous wandering centers
-    vec2 autoC = vec2(sin(uTime * 0.13) * 0.55, cos(uTime * 0.10) * 0.34);
-    vec2 toA = p - autoC; float aInfl = exp(-dot(toA, toA) * 2.2);
-    vec2 autoSwirl = vec2(-toA.y, toA.x) * aInfl * 0.6;
-    vec2 autoC2 = vec2(cos(uTime * 0.08) * -0.5, sin(uTime * 0.115) * 0.42);
-    vec2 toB = p - autoC2; float bInfl = exp(-dot(toB, toB) * 2.6);
-    autoSwirl += vec2(-toB.y, toB.x) * bInfl * 0.5;
-
-    // pointer wake
-    vec2 pc = mix(uPointerLag, uPointer, 0.7);
-    vec2 toP = p - pc; float pd = length(toP);
-    float infl = uPointerOn * exp(-pd * pd * 5.5);
-    vec2 swirl = vec2(-toP.y, toP.x) * infl * (0.45 + 2.0 * uPointerVel);
-    vec2 pull  = -toP * infl * 0.55;
-
-    // tap ripples
-    vec2 rDisp = vec2(0.0); float rLum = 0.0;
-    addRipple(uRippleA, p, uTime, rDisp, rLum);
-    addRipple(uRippleB, p, uTime, rDisp, rLum);
-    addRipple(uRippleC, p, uTime, rDisp, rLum);
-
-    // wind coordinate basis (collapses to isotropic when wW or uStretch->1)
-    vec2 dir = uWindDir; vec2 perp = vec2(-dir.y, dir.x);
-    float alongc = dot(p, dir), crossc = dot(p, perp);
-    vec2 wcoord = vec2(alongc * uStretch, crossc);
-    vec2 adv = dir * (uFlowSpeed * 0.14 * uTime * wW);
-    adv += dir * (infl * uPointerVel * 0.6) * wW;
-    vec2 pMot = mix(p, wcoord + adv, wW);
-
-    // ripple swell (analytic; reuses the two autonomous centers + pointer)
-    float K = uWaveK;
-    float ws = uWaveSpeed * (1.0 + 0.4 * wR) * uFlowSpeed;
-    float warpR = 0.12 * fbm(p * 2.4 + 0.3 * t);
-    float crest = 0.0; vec2 swellDisp = vec2(0.0);
-    {
-      vec2 to = p - autoC; float d = length(to) + warpR; float ph = d * K - uTime * ws;
-      float env = aInfl + 0.15 * wR;
-      crest = max(crest, smoothstep(0.82, 1.0, 0.5 + 0.5 * sin(ph)) * env);
-      swellDisp += (d > 1e-4 ? to / length(to) : vec2(0.0)) * cos(ph) * 0.020;
-    }
-    {
-      vec2 to = p - autoC2; float d = length(to) + warpR; float ph = d * (K * 1.12) - uTime * ws;
-      float env = bInfl + 0.15 * wR;
-      crest = max(crest, smoothstep(0.82, 1.0, 0.5 + 0.5 * sin(ph)) * env);
-      swellDisp += (d > 1e-4 ? to / length(to) : vec2(0.0)) * cos(ph) * 0.018;
-    }
-    {
-      float kp = K + 6.0 * uPointerVel; float php = pd * kp - uTime * ws;
-      crest = max(crest, smoothstep(0.80, 1.0, 0.5 + 0.5 * sin(php)) * infl);
-      swellDisp += (pd > 1e-4 ? toP / pd : vec2(0.0)) * cos(php) * (0.015 + 0.03 * uPointerVel);
-    }
-    crest = max(crest, max(rLum, 0.0) * (wR + wV * 0.5));
-
-    // churn damping + crest warp injection
-    autoSwirl *= 1.0 - uCalm * max(wR, wD * 0.3);
-    vec2 warpExtra = swellDisp * wR;
-
-    // domain-warped fbm (motif-aware coords + per-visit seed)
-    vec2 q = vec2(fbm(pMot * 1.9 + adv + seedOff + vec2(0.0, t)), fbm(pMot * 1.9 + adv + seedOff + vec2(5.2, -t * 0.9)));
-    vec2 warp = pMot * 2.0 + 2.3 * q + swirl + pull * 0.5 + rDisp + autoSwirl + warpExtra;
-    vec2 r = vec2(fbm(warp + vec2(1.7, 9.2) + 0.20 * t), fbm(warp + vec2(8.3, 2.8) - 0.16 * t));
-    float f = fbm(pMot * 2.3 + 2.8 * r + swirl * 1.5 + rDisp + autoSwirl * 0.8 + seedOff);
-
-    // baseline veil
-    float veil = smoothstep(0.26, 0.86, f);
-    veil += infl * 0.28 * uPointerVel + aInfl * 0.05;
-
-    // 5a ripple veil
-    veil = mix(veil, max(veil, crest), 0.6 * wR);
-
-    // 5b wind veil
-    float gust = vnoise(vec2(crossc * 1.3, alongc * 0.4 - uTime * uFlowSpeed * 0.28));
-    float streak = pow(smoothstep(0.26, 0.86, f), 2.2);
-    veil = mix(veil, streak * (0.7 + 0.55 * gust), wW);
-
-    // 5c voice veil (horizontal mel-band ribbons; reuses r as per-row loudness)
-    float tx = p.x * uWaveK - uTime * uWaveSpeed * 0.35 * uFlowSpeed;
-    float yb = (p.y * 0.5 + 0.5) * uBands; float row = floor(yb); float fr = fract(yb);
-    float energy = fbm(vec2(tx, row * 1.7) + 2.0 * r);
-    energy = clamp(energy, 0.05, 0.95);
-    energy *= 1.0 + uPointerOn * (0.6 + 2.0 * uPointerVel) * exp(-toP.y * toP.y * 8.0);
-    energy += max(rLum, 0.0) * 0.6;
-    energy = clamp(energy, 0.0, 1.4);
-    float band = smoothstep(0.22, 0.0, abs(fr - 0.5) * 2.0 - energy);
-    float bandVeil = band * energy;
-    veil = mix(veil, bandVeil, wV);
-
-    // 5d diffusion crisping (schedule)
-    float sigma = clamp(uSigma * (1.0 - 0.8 * infl), 0.0, 1.0);
-    float lo = mix(0.26, 0.20, (1.0 - sigma) * wD);
-    float hi = mix(0.86, 0.92, (1.0 - sigma) * wD);
-    veil = mix(veil, smoothstep(lo, hi, f), wD);
-
-    // baseline color
-    vec3 base = vec3(0.032, 0.037, 0.046), graphite = vec3(0.085, 0.097, 0.118);
-    vec3 col = mix(base, graphite, veil);
-    float core = pow(veil, 2.6);
-    col += uLapis * core * 0.18;
-    col += uLapis * (aInfl + bInfl) * 0.05 * wBase;
-    col += uLapis * infl * (0.06 + 0.22 * uPointerVel);
-
-    // motif lapis whispers (luminance only, weight-gated)
-    col += uLapis * crest * wR * (0.05 + 0.22 * uPointerVel) * uIntensity;
-    col += uLapis * gust * wW * 0.04 * uIntensity;
-    col += uLapis * infl * wW * (0.06 + 0.22 * uPointerVel);
-    col += uLapis * pow(bandVeil, 2.6) * wV * 0.16 * uIntensity;
-    col += uLapis * max(rLum, 0.0) * 0.05;
-
-    // diffusion score (cost-gated)
-    vec2 diffScore = vec2(0.0); float diffJit = 0.0;
-    if (wD > 0.01) {
-      float e = 0.012;
-      float fx = fbm(warp + vec2(e, 0.0)) - fbm(warp - vec2(e, 0.0));
-      float fy = fbm(warp + vec2(0.0, e)) - fbm(warp - vec2(0.0, e));
-      diffScore = vec2(fx, fy) / (2.0 * e);
-      diffJit = (hash(floor(warp * 9.0)) - 0.5) * sigma * 0.12;
-    }
-
-    // embedding motes (baseline + diffusion condense share this)
-    vec2 gAdv = warp + diffScore * (0.13 * (1.0 - sigma) * wD);
-    vec2 g = gAdv * 9.0;
-    float dotMask = step(mix(0.984, 0.972, (1.0 - sigma) * wD), hash(floor(g)));
-    float dd = length(fract(g) - 0.5 + diffJit);
-    float rad = mix(0.16, mix(0.16, 0.05, 1.0 - sigma), wD);
-    float onRidge = mix(1.0, smoothstep(0.0, 0.5, f), wD);
-    float mote = dotMask * smoothstep(rad, 0.0, dd) * (0.3 + 0.7 * veil) * onRidge;
-    col += (uLapis * 0.6 + 0.4) * mote * 0.05 * (1.0 + wD * 0.5);
-
-    // neural net skin (cost-gated): sparse nodes + bowed filaments in warped domain
-    float netAccum = 0.0;
-    if (wN > 0.01) {
-      float NS = 6.0;
-      vec2 nc = warp * NS;
-      vec2 c0 = floor(nc);
-      float emit0 = step(uNetSparse, hash(c0 + 11.0));
-      vec2 nodeC = c0 + 0.5 + (vec2(hash(c0 + 1.3), hash(c0 + 2.7)) - 0.5) * 0.6;
-      for (int j = -1; j <= 1; j++) {
-        for (int i = -1; i <= 1; i++) {
-          vec2 cell = c0 + vec2(float(i), float(j));
-          float h = hash(cell + 11.0);
-          if (h < uNetSparse) continue;
-          vec2 node = cell + 0.5 + (vec2(hash(cell + 1.3), hash(cell + 2.7)) - 0.5) * 0.6;
-          float nd = length(nc - node);
-          netAccum += smoothstep(0.15, 0.0, nd) * (0.6 + 0.4 * sin(uTime * 0.9 + h * 30.0));
-          if (emit0 > 0.5 && (i != 0 || j != 0)) {
-            vec2 ab = node - nodeC; float L2 = dot(ab, ab);
-            float u = clamp(dot(nc - nodeC, ab) / max(L2, 1e-4), 0.0, 1.0);
-            vec2 onSeg = nodeC + ab * u + normalize(vec2(-ab.y, ab.x)) * sin(u * 3.14159) * 0.12 * (hash(cell + 5.1) - 0.5);
-            float ld = length(nc - onSeg);
-            netAccum += smoothstep(0.04, 0.0, ld) * (1.0 - smoothstep(0.0, 1.4, sqrt(L2))) * 0.5
-              * (0.5 + 0.5 * sin(uTime * 0.9 - u * 4.0 + h * 10.0));
-          }
-        }
-      }
-      netAccum *= 0.4 + 0.6 * smoothstep(0.2, 0.7, veil);
-    }
-    col += uLapis * netAccum * wN * 0.13 * uIntensity;
-
-    // vignette
-    float vig = smoothstep(1.32, 0.28, length(p));
-    col *= vig;
-
-    // glowing pointer trail (additive lapis along the recent cursor path)
-    float trail = 0.0;
-    ${trailAccum}
-    col += (uLapis * 1.25 + 0.04) * min(trail, 2.6) * 0.16;
-
-    // grain (anneals out as diffusion settles)
-    float grain = hash(vUv * res + fract(uTime) * 97.0) - 0.5;
-    col += grain * mix(0.012, 0.03, sigma * wD);
-
-    col = mix(base * vig, col, uReveal);
-    gl_FragColor = vec4(col, 1.0);
-  }
-`;
-
-// ----- motif presets (CPU side): w = [ripple, wind, voice, net, diffusion] -----
-interface Preset { w: number[]; calm: number; stretch: number; waveK: number; flow: number; netSparse: number; bands: number; intensity: number; }
-const PRESETS: Preset[] = [
-  { w: [1, 0, 0, 0, 0], calm: 0.70, stretch: 1.0,  waveK: 13.0, flow: 1.15, netSparse: 0.86, bands: 8, intensity: 1.0 },
-  { w: [0, 1, 0, 0, 0], calm: 0.10, stretch: 0.35, waveK: 8.0,  flow: 1.0,  netSparse: 0.86, bands: 8, intensity: 0.9 },
-  { w: [0, 0, 1, 0, 0], calm: 0.40, stretch: 1.0,  waveK: 3.4,  flow: 0.85, netSparse: 0.86, bands: 8, intensity: 0.85 },
-  { w: [0, 0, 0, 1, 0], calm: 0.20, stretch: 1.0,  waveK: 8.0,  flow: 0.6,  netSparse: 0.86, bands: 8, intensity: 0.8 },
-  { w: [0, 0, 0, 0, 1], calm: 0.30, stretch: 1.0,  waveK: 8.0,  flow: 0.5,  netSparse: 0.86, bands: 8, intensity: 0.9 },
-];
-const smoother = (x: number) => x * x * x * (x * (x * 6 - 15) + 10);
+}
 
 export function start(canvas: HTMLCanvasElement): void {
-  const reduceMM = matchMedia('(prefers-reduced-motion: reduce)');
-  if (reduceMM.matches) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const nav = navigator as Navigator & { connection?: { saveData?: boolean }; deviceMemory?: number };
+  if (nav.connection?.saveData) return;
+  if (typeof nav.deviceMemory === 'number' && nav.deviceMemory < 2) return;
+  if (!simCapable()) return; // static poster remains the complete design
+  startSim(canvas);
+}
 
+const VERT = `#version 300 es
+in vec2 position;
+in vec2 uv;
+out vec2 vUv;
+void main() { vUv = uv; gl_Position = vec4(position, 0.0, 1.0); }`;
+
+const HEAD = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+out vec4 fragColor;
+`;
+
+const SPLAT = HEAD + `
+uniform sampler2D uSource;
+uniform vec2 uPoint;
+uniform vec2 uColor;
+uniform float uRadius;
+uniform float uAspect;
+void main(){
+  vec2 d = vUv - uPoint; d.x *= uAspect;
+  float g = exp(-dot(d, d) / uRadius);
+  fragColor = vec4(texture(uSource, vUv).xy + uColor * g, 0.0, 1.0);
+}`;
+
+const ADVECT = HEAD + `
+uniform sampler2D uVelocity;
+uniform sampler2D uSource;
+uniform vec2 uTexel;
+uniform float uDt;
+uniform float uDecay;
+void main(){
+  vec2 vel = texture(uVelocity, vUv).xy;
+  vec2 coord = vUv - uDt * vel * uTexel;
+  fragColor = vec4(texture(uSource, coord).xy * uDecay, 0.0, 1.0);
+}`;
+
+const DIVERGENCE = HEAD + `
+uniform sampler2D uVelocity;
+uniform vec2 uTexel;
+void main(){
+  float L = texture(uVelocity, vUv - vec2(uTexel.x, 0.0)).x;
+  float R = texture(uVelocity, vUv + vec2(uTexel.x, 0.0)).x;
+  float T = texture(uVelocity, vUv + vec2(0.0, uTexel.y)).y;
+  float B = texture(uVelocity, vUv - vec2(0.0, uTexel.y)).y;
+  fragColor = vec4(0.5 * ((R - L) + (T - B)), 0.0, 0.0, 1.0);
+}`;
+
+const CURL = HEAD + `
+uniform sampler2D uVelocity;
+uniform vec2 uTexel;
+void main(){
+  float L = texture(uVelocity, vUv - vec2(uTexel.x, 0.0)).y;
+  float R = texture(uVelocity, vUv + vec2(uTexel.x, 0.0)).y;
+  float T = texture(uVelocity, vUv + vec2(0.0, uTexel.y)).x;
+  float B = texture(uVelocity, vUv - vec2(0.0, uTexel.y)).x;
+  fragColor = vec4(0.5 * ((R - L) - (T - B)), 0.0, 0.0, 1.0);
+}`;
+
+const VORTICITY = HEAD + `
+uniform sampler2D uVelocity;
+uniform sampler2D uCurl;
+uniform vec2 uTexel;
+uniform float uCurlAmt;
+uniform float uDt;
+void main(){
+  float L = texture(uCurl, vUv - vec2(uTexel.x, 0.0)).x;
+  float R = texture(uCurl, vUv + vec2(uTexel.x, 0.0)).x;
+  float T = texture(uCurl, vUv + vec2(0.0, uTexel.y)).x;
+  float B = texture(uCurl, vUv - vec2(0.0, uTexel.y)).x;
+  float C = texture(uCurl, vUv).x;
+  vec2 force = 0.5 * vec2(abs(T) - abs(B), abs(R) - abs(L));
+  force /= length(force) + 1e-4;
+  force *= uCurlAmt * C;
+  force.y *= -1.0;
+  vec2 vel = texture(uVelocity, vUv).xy;
+  fragColor = vec4(vel + force * uDt, 0.0, 1.0);
+}`;
+
+const CLEARP = HEAD + `
+uniform sampler2D uTex;
+uniform float uValue;
+void main(){ fragColor = vec4(texture(uTex, vUv).xy * uValue, 0.0, 1.0); }`;
+
+const PRESSURE = HEAD + `
+uniform sampler2D uPressure;
+uniform sampler2D uDivergence;
+uniform vec2 uTexel;
+void main(){
+  float L = texture(uPressure, vUv - vec2(uTexel.x, 0.0)).x;
+  float R = texture(uPressure, vUv + vec2(uTexel.x, 0.0)).x;
+  float T = texture(uPressure, vUv + vec2(0.0, uTexel.y)).x;
+  float B = texture(uPressure, vUv - vec2(0.0, uTexel.y)).x;
+  float div = texture(uDivergence, vUv).x;
+  fragColor = vec4((L + R + T + B - div) * 0.25, 0.0, 0.0, 1.0);
+}`;
+
+const GRADSUB = HEAD + `
+uniform sampler2D uPressure;
+uniform sampler2D uVelocity;
+uniform vec2 uTexel;
+void main(){
+  float L = texture(uPressure, vUv - vec2(uTexel.x, 0.0)).x;
+  float R = texture(uPressure, vUv + vec2(uTexel.x, 0.0)).x;
+  float T = texture(uPressure, vUv + vec2(0.0, uTexel.y)).x;
+  float B = texture(uPressure, vUv - vec2(0.0, uTexel.y)).x;
+  vec2 vel = texture(uVelocity, vUv).xy - 0.5 * vec2(R - L, T - B);
+  fragColor = vec4(vel, 0.0, 1.0);
+}`;
+
+const COMPOSITE = HEAD + `
+uniform sampler2D uDye;
+uniform sampler2D uCurl;
+uniform vec2 uResolution;
+uniform vec3 uLapis;
+uniform float uReveal;
+uniform float uTime;
+void main(){
+  float dye = texture(uDye, vUv).x;
+  float curl = abs(texture(uCurl, vUv).x);
+  vec3 base = vec3(0.031, 0.035, 0.047);
+  vec3 graphite = vec3(0.060, 0.070, 0.085);
+  float structure = clamp(dye * 0.85 + curl * 0.04, 0.0, 1.0);
+  vec3 col = base;
+  col += graphite * smoothstep(0.015, 0.5, structure);
+  col += uLapis * pow(clamp(dye, 0.0, 1.0), 1.7) * 0.24;
+  vec2 p = vUv - 0.5; p.x *= uResolution.x / uResolution.y;
+  col *= smoothstep(1.28, 0.26, length(p));
+  float gr = fract(sin(dot(vUv * uResolution + fract(uTime), vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+  col += gr * 0.012;
+  col = mix(base * smoothstep(1.28, 0.26, length(p)), col, uReveal);
+  fragColor = vec4(col, 1.0);
+}`;
+
+function startSim(canvas: HTMLCanvasElement): void {
   const isCoarse = matchMedia('(pointer: coarse)').matches;
-  const dpr = Math.min(window.devicePixelRatio || 1, isCoarse ? 1.4 : 1.75);
+  const dpr = Math.min(window.devicePixelRatio || 1, isCoarse ? 1.25 : 1.5);
 
   let renderer: Renderer;
   try {
-    renderer = new Renderer({ canvas, alpha: false, antialias: false, depth: false, dpr, powerPreference: 'low-power' });
+    renderer = new Renderer({ canvas, webgl: 2, alpha: false, antialias: false, depth: false, stencil: false, dpr, powerPreference: 'low-power' });
   } catch {
     return;
   }
-  const gl = renderer.gl;
-  gl.clearColor(0.032, 0.037, 0.046, 1);
+  const gl = renderer.gl as WebGL2RenderingContext;
+  if (!gl.getExtension('EXT_color_buffer_float')) return;
+  const linear = gl.getExtension('OES_texture_float_linear') ? gl.LINEAR : gl.NEAREST;
 
-  const empty = (): [number, number, number] => [0, 0, -1];
-  const rnd = Math.random;
-  let from = Math.floor(rnd() * PRESETS.length);
-  let to = (from + 1 + Math.floor(rnd() * (PRESETS.length - 1))) % PRESETS.length;
-  const holdRand = () => 6 + rnd() * 8;
-  const durRand = () => 3.5 + rnd() * 2.5;
-  let morphStart = 0;
-  let dur = durRand();
-  let windAngle = rnd() * Math.PI * 2;
-  const phaseOffset = rnd() * 120;
+  // ---- simulation resolution (NOT scaled by DPR — the key perf lever) ----
+  const SIM = isCoarse ? 96 : 128;
+  const DYE = isCoarse ? 384 : 512;
+  let simW = SIM, simH = SIM, dyeW = DYE, dyeH = DYE;
+  let texelSim: [number, number] = [1 / SIM, 1 / SIM];
+  function computeRes() {
+    const a = window.innerWidth / window.innerHeight;
+    if (a >= 1) { simW = Math.round(SIM * a); simH = SIM; dyeW = Math.round(DYE * a); dyeH = DYE; }
+    else { simW = SIM; simH = Math.round(SIM / a); dyeW = DYE; dyeH = Math.round(DYE / a); }
+    texelSim = [1 / simW, 1 / simH];
+  }
+  computeRes();
 
-  const uniforms: Record<string, { value: unknown }> = {
-    uResolution: { value: [1, 1] },
-    uTime: { value: 0 },
-    uReveal: { value: 0 },
-    uPointer: { value: [0, 0] },
-    uPointerLag: { value: [0, 0] },
-    uPointerOn: { value: 0 },
-    uPointerVel: { value: 0 },
-    uRippleA: { value: empty() },
-    uRippleB: { value: empty() },
-    uRippleC: { value: empty() },
-    uWaveSpeed: { value: 0.8 },
-    uLapis: { value: [0.18, 0.36, 0.62] },
-    uTrailLife: { value: 0.7 },
-    uMotif: { value: PRESETS[from].w.slice(0, 4) },
-    uMotifDiff: { value: PRESETS[from].w[4] },
-    uWindDir: { value: [Math.cos(windAngle), Math.sin(windAngle)] },
-    uCalm: { value: PRESETS[from].calm },
-    uStretch: { value: PRESETS[from].stretch },
-    uWaveK: { value: PRESETS[from].waveK },
-    uFlowSpeed: { value: PRESETS[from].flow },
-    uSigma: { value: 0.4 },
-    uNetSparse: { value: PRESETS[from].netSparse },
-    uBands: { value: PRESETS[from].bands },
-    uIntensity: { value: PRESETS[from].intensity },
-    uSeed: { value: [rnd() * 100, rnd() * 100] },
-  };
-  const trVals: [number, number, number][] = [];
-  for (let i = 0; i < TRAIL_N; i++) { trVals.push(empty()); uniforms['uTr' + i] = { value: trVals[i] }; }
+  function rt(w: number, h: number, filter: number) {
+    return new RenderTarget(gl, {
+      width: w, height: h, depth: false,
+      internalFormat: gl.RG16F, format: gl.RG, type: gl.HALF_FLOAT,
+      minFilter: filter, magFilter: filter, wrapS: gl.CLAMP_TO_EDGE, wrapT: gl.CLAMP_TO_EDGE,
+    });
+  }
+  function dbl(w: number, h: number, filter: number) {
+    let read = rt(w, h, filter), write = rt(w, h, filter);
+    return { get read() { return read; }, get write() { return write; }, swap() { const t = read; read = write; write = t; } };
+  }
 
-  const program = new Program(gl, { vertex, fragment, uniforms });
-  const mesh = new Mesh(gl, { geometry: new Triangle(gl), program });
-  const u = program.uniforms as Record<string, { value: any }>;
+  let velocity = dbl(simW, simH, linear);
+  let dye = dbl(dyeW, dyeH, linear);
+  let pressure = dbl(simW, simH, gl.NEAREST);
+  let divergence = rt(simW, simH, gl.NEAREST);
+  let curl = rt(simW, simH, gl.NEAREST);
+
+  const tri = new Triangle(gl);
+  function prog(fragment: string, uniforms: Record<string, { value: unknown }>) {
+    const program = new Program(gl, { vertex: VERT, fragment, uniforms, depthTest: false, depthWrite: false });
+    return { program, mesh: new Mesh(gl, { geometry: tri, program }), u: program.uniforms as Record<string, { value: any }> };
+  }
+
+  const splat = prog(SPLAT, { uSource: { value: null }, uPoint: { value: [0, 0] }, uColor: { value: [0, 0] }, uRadius: { value: 0.0002 }, uAspect: { value: 1 } });
+  const advect = prog(ADVECT, { uVelocity: { value: null }, uSource: { value: null }, uTexel: { value: texelSim }, uDt: { value: 0.016 }, uDecay: { value: 0.98 } });
+  const diverg = prog(DIVERGENCE, { uVelocity: { value: null }, uTexel: { value: texelSim } });
+  const curlP = prog(CURL, { uVelocity: { value: null }, uTexel: { value: texelSim } });
+  const vortP = prog(VORTICITY, { uVelocity: { value: null }, uCurl: { value: null }, uTexel: { value: texelSim }, uCurlAmt: { value: 22 }, uDt: { value: 0.016 } });
+  const clearP = prog(CLEARP, { uTex: { value: null }, uValue: { value: 0.8 } });
+  const press = prog(PRESSURE, { uPressure: { value: null }, uDivergence: { value: null }, uTexel: { value: texelSim } });
+  const gradP = prog(GRADSUB, { uPressure: { value: null }, uVelocity: { value: null }, uTexel: { value: texelSim } });
+  const comp = prog(COMPOSITE, { uDye: { value: null }, uCurl: { value: null }, uResolution: { value: [1, 1] }, uLapis: { value: [0.18, 0.36, 0.62] }, uReveal: { value: 0 }, uTime: { value: 0 } });
+
+  function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
+    renderer.render({ scene: p.mesh, target: target ?? undefined });
+  }
 
   function resize() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     canvas.style.width = '100%';
     canvas.style.height = '100%';
-    u.uResolution.value = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+    comp.u.uResolution.value = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+    const a = window.innerWidth / window.innerHeight;
+    splat.u.uAspect.value = a;
   }
-  resize();
-  window.addEventListener('resize', resize, { passive: true });
 
-  // ---- unified pointer (mouse + touch + pen); canvas is pointer-events:none ----
-  const t0 = performance.now() - phaseOffset * 1000;
-  let tx = 0, ty = 0, cx = 0, cy = 0, lx = 0, ly = 0;
-  let vel = 0, velTarget = 0, lastMove = -1e4, lpx = 0, lpy = 0;
-  let downX = 0, downY = 0, downT = 0;
-  const ripples: [number, number, number][] = [empty(), empty(), empty()];
-  let ri = 0, ti = 0, lastPX = 0, lastPY = 0;
+  // pre-allocated input (no per-frame / per-event allocation → no click jank)
+  const input = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, moved: false, down: false, tap: false, downX: 0, downY: 0, downT: 0, lastMove: -1e4 };
+  const PT: [number, number] = [0, 0];
+  const COL: [number, number] = [0, 0];
 
-  function toXY(clientX: number, clientY: number): [number, number] {
-    const asp = window.innerWidth / window.innerHeight;
-    return [(clientX / window.innerWidth - 0.5) * asp, -(clientY / window.innerHeight - 0.5)];
+  function splatVel(x: number, y: number, fx: number, fy: number, radius: number) {
+    PT[0] = x; PT[1] = y; COL[0] = fx; COL[1] = fy;
+    splat.u.uSource.value = velocity.read.texture;
+    splat.u.uPoint.value = PT; splat.u.uColor.value = COL; splat.u.uRadius.value = radius;
+    pass(splat, velocity.write); velocity.swap();
+  }
+  function splatDye(x: number, y: number, amount: number, radius: number) {
+    PT[0] = x; PT[1] = y; COL[0] = amount; COL[1] = 0;
+    splat.u.uSource.value = dye.read.texture;
+    splat.u.uPoint.value = PT; splat.u.uColor.value = COL; splat.u.uRadius.value = radius;
+    pass(splat, dye.write); dye.swap();
+  }
+
+  const SPLAT_FORCE = 6200;
+  function pointerToUV(clientX: number, clientY: number): [number, number] {
+    return [clientX / window.innerWidth, 1 - clientY / window.innerHeight];
   }
   window.addEventListener('pointermove', (e) => {
     if (!e.isPrimary) return;
-    const [nx, ny] = toXY(e.clientX, e.clientY);
-    velTarget = Math.min(Math.hypot(nx - lpx, ny - lpy) * 6.0, 1.2);
-    lpx = nx; lpy = ny; tx = nx; ty = ny;
-    lastMove = performance.now();
+    const [ux, uy] = pointerToUV(e.clientX, e.clientY);
+    input.x = ux; input.y = uy; input.moved = true; input.lastMove = performance.now();
   }, { passive: true });
   window.addEventListener('pointerdown', (e) => {
     if (!e.isPrimary) return;
-    const [nx, ny] = toXY(e.clientX, e.clientY);
-    lpx = nx; lpy = ny; tx = nx; ty = ny;
-    lastMove = downT = performance.now();
-    downX = e.clientX; downY = e.clientY;
+    const [ux, uy] = pointerToUV(e.clientX, e.clientY);
+    input.x = input.px = ux; input.y = input.py = uy;
+    input.down = true; input.downX = e.clientX; input.downY = e.clientY; input.downT = performance.now();
+    input.lastMove = performance.now();
   }, { passive: true });
   window.addEventListener('pointerup', (e) => {
     if (!e.isPrimary) return;
-    const now = performance.now();
-    if (Math.hypot(e.clientX - downX, e.clientY - downY) < 10 && now - downT < 250) {
-      const [nx, ny] = toXY(e.clientX, e.clientY);
-      ripples[ri] = [nx, ny, (now - t0) / 1000];
-      u['uRipple' + 'ABC'[ri]].value = ripples[ri];
-      ri = (ri + 1) % ripples.length;
+    // a tap (not a stir) = a radial "drop" → real ripples emerge from the pressure solve
+    if (input.down && Math.hypot(e.clientX - input.downX, e.clientY - input.downY) < 10 && performance.now() - input.downT < 250) {
+      input.tap = true;
     }
+    input.down = false;
   }, { passive: true });
-  const calmReset = () => { velTarget = 0; };
-  window.addEventListener('pointercancel', calmReset, { passive: true });
-  window.addEventListener('blur', calmReset);
 
   // ---- loop ----
-  let visible = !document.hidden, inView = true, raf = 0, prev = performance.now();
+  let visible = !document.hidden, inView = true, raf = 0;
+  const t0 = performance.now();
+  let prev = t0;
+  let autoPhase = Math.random() * 1000;
 
-  function frame(now: number) {
-    raf = requestAnimationFrame(frame);
+  function step(now: number) {
+    raf = requestAnimationFrame(step);
     let dt = (now - prev) / 1000; prev = now;
     dt = Math.min(Math.max(dt, 1 / 120), 1 / 30);
-
-    cx += (tx - cx) * (1 - Math.exp(-5.0 * dt));
-    cy += (ty - cy) * (1 - Math.exp(-5.0 * dt));
-    lx += (tx - lx) * (1 - Math.exp(-1.3 * dt));
-    ly += (ty - ly) * (1 - Math.exp(-1.3 * dt));
-    vel += (velTarget - vel) * (1 - Math.exp(-7.7 * dt));
-    velTarget *= Math.pow(0.94, dt * 60);
-
     const T = (now - t0) / 1000;
-    if (morphStart === 0) morphStart = now + holdRand() * 1000;
 
-    // ---- motif morph ----
-    let k = 0;
-    if (now >= morphStart) {
-      const phase = (now - morphStart) / (dur * 1000);
-      if (phase >= 1) {
-        from = to;
-        to = (from + 1 + Math.floor(rnd() * (PRESETS.length - 1))) % PRESETS.length;
-        morphStart = now + holdRand() * 1000;
-        dur = durRand();
-        k = 0;
-      } else {
-        k = smoother(phase);
-      }
+    // ---- inputs → splats ----
+    // cursor stir: strong velocity + a little dye where it moves
+    if (input.moved) {
+      const dx = input.x - input.px, dy = input.y - input.py;
+      const a = window.innerWidth / window.innerHeight;
+      splatVel(input.x, input.y, dx * SPLAT_FORCE, dy * SPLAT_FORCE, 0.00018 * a);
+      const speed = Math.min(Math.hypot(dx, dy) * 14, 1);
+      splatDye(input.x, input.y, 0.06 + 0.20 * speed, 0.00014 * a);
+      input.px = input.x; input.py = input.y; input.moved = false;
     }
-    const A = PRESETS[from], B = PRESETS[to];
-    const lerp = (a: number, b: number) => a + (b - a) * k;
-    u.uCalm.value = lerp(A.calm, B.calm);
-    u.uStretch.value = lerp(A.stretch, B.stretch);
-    u.uWaveK.value = lerp(A.waveK, B.waveK);
-    u.uFlowSpeed.value = lerp(A.flow, B.flow);
-    u.uNetSparse.value = lerp(A.netSparse, B.netSparse);
-    u.uBands.value = lerp(A.bands, B.bands);
-    u.uIntensity.value = lerp(A.intensity, B.intensity);
-    const w = A.w.map((x, i) => x + (B.w[i] - x) * k);
-    u.uMotif.value = [w[0], w[1], w[2], w[3]];
-    u.uMotifDiff.value = w[4];
-    const sigmaBreath = 0.5 + 0.5 * Math.sin(T * 0.045);
-    u.uSigma.value = 0.4 * (1 - w[4]) + sigmaBreath * w[4];
-    windAngle += dt * (0.02 + 0.01 * Math.sin(phaseOffset + T * 0.05));
-    u.uWindDir.value = [Math.cos(windAngle), Math.sin(windAngle)];
-
-    u.uTime.value = T;
-    u.uPointer.value = [cx, cy];
-    u.uPointerLag.value = [lx, ly];
-    const on = Math.max(0, 1 - (now - lastMove) / 2600);
-    u.uPointerOn.value = on;
-    u.uPointerVel.value = vel;
-    u.uReveal.value = Math.min(1, u.uReveal.value + dt / 1.1);
-
-    // sample the glowing trail along the actual path (new array ref so OGL re-uploads)
-    if (on > 0.04) {
-      const dpx = tx - lastPX, dpy = ty - lastPY;
-      if (dpx * dpx + dpy * dpy > 0.00012) {
-        trVals[ti] = [tx, ty, T];
-        u['uTr' + ti].value = trVals[ti];
-        ti = (ti + 1) % TRAIL_N;
-        lastPX = tx; lastPY = ty;
+    if (input.tap) {
+      // radial outward velocity burst + dye drop
+      const a = window.innerWidth / window.innerHeight;
+      for (let i = 0; i < 8; i++) {
+        const ang = (i / 8) * Math.PI * 2;
+        splatVel(input.x, input.y, Math.cos(ang) * SPLAT_FORCE * 0.5, Math.sin(ang) * SPLAT_FORCE * 0.5, 0.00022 * a);
       }
+      splatDye(input.x, input.y, 0.5, 0.0003 * a);
+      input.tap = false;
+    }
+    // autonomous life: two slow wandering stirrers keep the field alive when idle
+    const a = window.innerWidth / window.innerHeight;
+    const ax = 0.5 + 0.32 * Math.sin(T * 0.11 + autoPhase), ay = 0.5 + 0.26 * Math.cos(T * 0.08 + autoPhase);
+    splatVel(ax, ay, Math.cos(T * 0.7) * 380, Math.sin(T * 0.9) * 380, 0.0006 * a);
+    const bx = 0.5 + 0.36 * Math.cos(T * 0.07 - autoPhase), by = 0.5 + 0.30 * Math.sin(T * 0.1 - autoPhase);
+    splatVel(bx, by, Math.sin(T * 0.6) * 340, Math.cos(T * 0.8) * 340, 0.0006 * a);
+    if (Math.floor(T * 2) !== Math.floor((T - dt) * 2)) splatDye(ax, ay, 0.10, 0.0008 * a); // a soft puff ~2/s
+
+    // ---- fluid step ----
+    curlP.u.uVelocity.value = velocity.read.texture; curlP.u.uTexel.value = texelSim;
+    pass(curlP, curl);
+
+    vortP.u.uVelocity.value = velocity.read.texture; vortP.u.uCurl.value = curl.texture; vortP.u.uTexel.value = texelSim; vortP.u.uDt.value = dt;
+    pass(vortP, velocity.write); velocity.swap();
+
+    diverg.u.uVelocity.value = velocity.read.texture; diverg.u.uTexel.value = texelSim;
+    pass(diverg, divergence);
+
+    clearP.u.uTex.value = pressure.read.texture;
+    pass(clearP, pressure.write); pressure.swap();
+
+    const N = isCoarse ? 10 : 20;
+    press.u.uDivergence.value = divergence.texture; press.u.uTexel.value = texelSim;
+    for (let i = 0; i < N; i++) {
+      press.u.uPressure.value = pressure.read.texture;
+      pass(press, pressure.write); pressure.swap();
     }
 
-    renderer.render({ scene: mesh });
+    gradP.u.uPressure.value = pressure.read.texture; gradP.u.uVelocity.value = velocity.read.texture; gradP.u.uTexel.value = texelSim;
+    pass(gradP, velocity.write); velocity.swap();
+
+    advect.u.uTexel.value = texelSim; advect.u.uDt.value = dt;
+    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = velocity.read.texture; advect.u.uDecay.value = 0.985;
+    pass(advect, velocity.write); velocity.swap();
+
+    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDecay.value = 0.972;
+    pass(advect, dye.write); dye.swap();
+
+    // ---- composite to screen ----
+    comp.u.uDye.value = dye.read.texture; comp.u.uCurl.value = curl.texture;
+    comp.u.uReveal.value = Math.min(1, comp.u.uReveal.value + dt / 1.2);
+    comp.u.uTime.value = T;
+    pass(comp, null);
+
     if (!canvas.classList.contains('is-live')) canvas.classList.add('is-live');
   }
 
   function gate() {
-    if (visible && inView) {
-      if (!raf) { prev = performance.now(); raf = requestAnimationFrame(frame); }
-    } else if (raf) {
-      cancelAnimationFrame(raf);
-      raf = 0;
-    }
+    if (visible && inView) { if (!raf) { prev = performance.now(); raf = requestAnimationFrame(step); } }
+    else if (raf) { cancelAnimationFrame(raf); raf = 0; }
   }
+
+  // ---- prewarm: seed some turbulence + run a couple of steps so first interaction never compiles ----
+  resize();
+  window.addEventListener('resize', () => { computeRes(); resize(); }, { passive: true });
+  for (let i = 0; i < 14; i++) {
+    const x = Math.random(), y = Math.random();
+    splatVel(x, y, (Math.random() - 0.5) * 1600, (Math.random() - 0.5) * 1600, 0.0008);
+    splatDye(x, y, 0.18, 0.001);
+  }
+
   document.addEventListener('visibilitychange', () => { visible = !document.hidden; gate(); });
   if ('IntersectionObserver' in window) {
     new IntersectionObserver(([e]) => { inView = e.isIntersecting; gate(); }, { threshold: 0 }).observe(canvas);
   }
-  reduceMM.addEventListener?.('change', () => {
-    if (reduceMM.matches && raf) { cancelAnimationFrame(raf); raf = 0; canvas.classList.remove('is-live'); }
-  });
   canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); if (raf) cancelAnimationFrame(raf); raf = 0; });
-  canvas.addEventListener('webglcontextrestored', () => { resize(); gate(); });
-
   gate();
 }
