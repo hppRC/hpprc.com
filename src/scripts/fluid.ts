@@ -246,7 +246,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   const advect = prog(ADVECT, { uVelocity: { value: null }, uSource: { value: null }, uTexel: { value: texelSim }, uDt: { value: 0.016 }, uDissipation: { value: 0.2 } });
   const diverg = prog(DIVERGENCE, { uVelocity: { value: null }, uTexel: { value: texelSim } });
   const curlP = prog(CURL, { uVelocity: { value: null }, uTexel: { value: texelSim } });
-  const vortP = prog(VORTICITY, { uVelocity: { value: null }, uCurl: { value: null }, uTexel: { value: texelSim }, uCurlAmt: { value: 30 }, uDt: { value: 0.016 } });
+  const vortP = prog(VORTICITY, { uVelocity: { value: null }, uCurl: { value: null }, uTexel: { value: texelSim }, uCurlAmt: { value: 16 }, uDt: { value: 0.016 } });
   const clearP = prog(CLEARP, { uTex: { value: null }, uValue: { value: 0.8 } });
   const press = prog(PRESSURE, { uPressure: { value: null }, uDivergence: { value: null }, uTexel: { value: texelSim } });
   const gradP = prog(GRADSUB, { uPressure: { value: null }, uVelocity: { value: null }, uTexel: { value: texelSim } });
@@ -289,7 +289,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   window.addEventListener('pointerdown', (e) => { if (!e.isPrimary) return; const [ux, uy] = toUV(e.clientX, e.clientY); input.x = input.px = ux; input.y = input.py = uy; input.down = true; input.downX = e.clientX; input.downY = e.clientY; input.downT = performance.now(); input.lastMove = performance.now(); }, { passive: true });
   window.addEventListener('pointerup', (e) => { if (!e.isPrimary) return; if (input.down && Math.hypot(e.clientX - input.downX, e.clientY - input.downY) < 10 && performance.now() - input.downT < 250) input.tap = true; input.down = false; }, { passive: true });
 
-  const SPLAT_FORCE = 6400;
+  const SPLAT_FORCE = 3200;
   let visible = !document.hidden, inView = true, raf = 0;
   const t0 = performance.now();
   let prev = t0;
@@ -316,13 +316,13 @@ function startSim(canvas: HTMLCanvasElement): void {
     const fr = Math.min(dt * 60, 2);
     const sp = Math.hypot(evx, evy);
     let fx: number, fy: number;
-    if (active) { fx = evx * SPLAT_FORCE * 1.6; fy = evy * SPLAT_FORCE * 1.6; }
+    if (active) { fx = evx * SPLAT_FORCE; fy = evy * SPLAT_FORCE; }
     else {
       const ux = sp > 1e-6 ? evx / sp : 1, uy = sp > 1e-6 ? evy / sp : 0;
-      fx = (ux * 0.7 - uy * 0.7) * 150;     // consistent gentle stir + swirl along the orbit
-      fy = (uy * 0.7 + ux * 0.7) * 150;
+      fx = (ux * 0.7 - uy * 0.7) * 70;     // gentle stir + swirl along the orbit (calm, not windy)
+      fy = (uy * 0.7 + ux * 0.7) * 70;
     }
-    doSplat(emitX, emitY, fx, fy, lapis(0.085 * fr)); // continuous, slow-building, long-lasting
+    doSplat(emitX, emitY, fx, fy, lapis(0.13 * fr)); // continuous, slow, long-lasting, same brightness idle/active
     input.moved = false;
 
     // ---- fluid step ----
@@ -335,7 +335,7 @@ function startSim(canvas: HTMLCanvasElement): void {
     for (let i = 0; i < N; i++) { press.u.uPressure.value = pressure.read.texture; pass(press, pressure.write); pressure.swap(); }
     gradP.u.uPressure.value = pressure.read.texture; gradP.u.uVelocity.value = velocity.read.texture; pass(gradP, velocity.write); velocity.swap();
     advect.u.uTexel.value = texelSim; advect.u.uDt.value = dt;
-    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = velocity.read.texture; advect.u.uDissipation.value = 0.10;
+    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = velocity.read.texture; advect.u.uDissipation.value = 0.18;
     pass(advect, velocity.write); velocity.swap();
     advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDissipation.value = 0.16;
     pass(advect, dye.write); dye.swap();
