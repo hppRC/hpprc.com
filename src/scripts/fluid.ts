@@ -175,6 +175,9 @@ uniform vec2 uResolution;
 uniform float uReveal;
 uniform float uTime;
 uniform float uBloomAmt;
+uniform vec2 uTextC;     // text-block centre (UV) — responsive
+uniform vec2 uTextR;     // text-block ellipse radii (UV) — responsive
+uniform float uTextDim;  // how much to thin the smoke over the text
 void main(){
   vec3 c = texture(uDye, vUv).rgb;
   // subtle shading from the dye gradient for a smoky, three-dimensional read
@@ -187,8 +190,8 @@ void main(){
   c += texture(uBloom, vUv).rgb * uBloomAmt;
   vec2 p = vUv - 0.5; p.x *= uResolution.x / uResolution.y;
   c *= smoothstep(1.35, 0.25, length(p));               // gentle vignette
-  vec2 td = (vUv - vec2(0.20, 0.5)) / vec2(0.34, 0.26);  // soft elliptical region over the text block
-  c *= mix(0.5, 1.0, smoothstep(0.5, 1.3, length(td)));  // thin the smoke there (no box: black stays black)
+  vec2 td = (vUv - uTextC) / uTextR;                     // soft elliptical region over the text block
+  c *= mix(uTextDim, 1.0, smoothstep(0.5, 1.3, length(td)));  // thin the smoke there (no box: black stays black)
   float gr = fract(sin(dot(vUv * uResolution + fract(uTime), vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
   c += gr * 0.006;
   fragColor = vec4(c * uReveal, 1.0);
@@ -285,7 +288,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   const gradP = prog(GRADSUB, { uPressure: { value: null }, uVelocity: { value: null }, uTexel: { value: texelSim } });
   const prefilter = prog(PREFILTER, { uTexture: { value: null }, uThreshold: { value: 0.20 }, uKnee: { value: 0.12 } });
   const blur = prog(BLUR, { uTexture: { value: null }, uDir: { value: [0, 0] } });
-  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 } });
+  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 }, uTextC: { value: [0.2, 0.5] }, uTextR: { value: [0.34, 0.26] }, uTextDim: { value: 0.5 } });
   const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 2.5 }, uScale: { value: 1.4 } });
 
   function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
@@ -296,6 +299,18 @@ function startSim(canvas: HTMLCanvasElement): void {
     canvas.style.width = '100%';
     canvas.style.height = '100%';
     display.u.uResolution.value = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+    // keep the text legible: on narrow/portrait screens the hero text spans the full
+    // width and stacks taller, so widen the thinned region, recentre it, and thin harder
+    const portrait = window.innerWidth < 760 || window.innerHeight >= window.innerWidth;
+    if (portrait) {
+      display.u.uTextC.value = [0.5, 0.46];
+      display.u.uTextR.value = [0.72, 0.34];
+      display.u.uTextDim.value = 0.34;
+    } else {
+      display.u.uTextC.value = [0.2, 0.5];
+      display.u.uTextR.value = [0.34, 0.26];
+      display.u.uTextDim.value = 0.5;
+    }
   }
 
   // ---- colour: cool-leaning, dim → smoky, not neon ----
