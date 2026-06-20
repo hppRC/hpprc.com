@@ -46,20 +46,6 @@ in vec2 vUv;
 out vec4 fragColor;
 `;
 
-// shared "speech-like" oscilloscope signal (used by the waveform passes and the display trace)
-const WSIG = `
-float wcarrier(float x, float t){
-  return 0.55 * sin(x * 280.0 - t * 2.2)
-       + 0.30 * sin(x * 470.0 - t * 3.6 + 1.3)
-       + 0.18 * sin(x * 730.0 - t * 5.2 + 0.6);
-}
-float wenv(float x, float t){               // syllable/word envelope → loud bursts + silences
-  float s = x * 3.4 - t * 0.5;
-  float a = 0.5 + 0.5 * sin(s * 6.2832);
-  float b = 0.5 + 0.5 * sin(s * 2.1 + 1.0);
-  return pow(clamp(a * b, 0.0, 1.0), 1.6);
-}`;
-
 const SPLAT = HEAD + `
 uniform sampler2D uSource;
 uniform vec2 uPoint;
@@ -181,7 +167,7 @@ void main(){
   fragColor = vec4(c, 1.0);
 }`;
 
-const DISPLAY = HEAD + WSIG + `
+const DISPLAY = HEAD + `
 uniform sampler2D uDye;
 uniform sampler2D uBloom;
 uniform vec2 uTexelDye;
@@ -189,8 +175,6 @@ uniform vec2 uResolution;
 uniform float uReveal;
 uniform float uTime;
 uniform float uBloomAmt;
-uniform float uWaveAmt, uWaveAmp, uWaveBand;
-uniform vec3 uWaveCol;
 void main(){
   vec3 c = texture(uDye, vUv).rgb;
   // subtle shading from the dye gradient for a smoky, three-dimensional read
@@ -201,9 +185,6 @@ void main(){
   vec3 n = normalize(vec3(r - l, t - b, length(uTexelDye) * 12.0));
   c *= 0.78 + 0.22 * clamp(dot(n, normalize(vec3(-0.4, 0.5, 1.0))), 0.0, 1.0);
   c += texture(uBloom, vUv).rgb * uBloomAmt;
-  // crisp oscilloscope trace of the audio signal, sitting in front of the smoke it sheds
-  float wy = 0.5 + uWaveAmp * wenv(vUv.x, uTime) * wcarrier(vUv.x, uTime);
-  c += uWaveCol * exp(-((vUv.y - wy) * (vUv.y - wy)) / uWaveBand) * uWaveAmt;
   vec2 p = vUv - 0.5; p.x *= uResolution.x / uResolution.y;
   c *= smoothstep(1.35, 0.25, length(p));               // gentle vignette
   vec2 td = (vUv - vec2(0.20, 0.5)) / vec2(0.34, 0.26);  // soft elliptical region over the text block
@@ -242,85 +223,6 @@ void main(){
   vec2 f = vec2(fbm(p + vec2(0.0, e)) - fbm(p - vec2(0.0, e)),
              -(fbm(p + vec2(e, 0.0)) - fbm(p - vec2(e, 0.0)))) / (2.0 * e);
   fragColor = vec4(texture(uVelocity, vUv).xy + f * uAmt, 0.0, 1.0);
-}`;
-
-// ---- motif shaders: the waveform passes + ripple rings (the WSIG signal is defined up top) ----
-// waveform → dye: a soft gaussian band along the curve, brighter where it's "loud"
-const WAVE_DYE = HEAD + WSIG + `
-uniform sampler2D uSource;
-uniform float uTime, uAmp, uBand, uWeight;
-uniform vec3 uColor;
-void main(){
-  float e = wenv(vUv.x, uTime);
-  float wy = 0.5 + uAmp * e * wcarrier(vUv.x, uTime);
-  float band = exp(-((vUv.y - wy) * (vUv.y - wy)) / uBand);
-  fragColor = vec4(texture(uSource, vUv).rgb + uColor * band * (0.18 + 0.82 * e) * uWeight, 1.0);
-}`;
-
-// waveform → velocity: vertical push = the line's own speed, so it drags fluid and sheds smoke
-const WAVE_VEL = HEAD + WSIG + `
-uniform sampler2D uVelocity;
-uniform float uTime, uAmp, uBand, uForce, uWeight;
-void main(){
-  float e = wenv(vUv.x, uTime);
-  float wy = 0.5 + uAmp * e * wcarrier(vUv.x, uTime);
-  float band = exp(-((vUv.y - wy) * (vUv.y - wy)) / (uBand * 4.0));
-  // push fluid outward from the centre line so the waveform sheds smoke above & below
-  fragColor = vec4(texture(uVelocity, vUv).xy + vec2(0.0, (wy - 0.5) * uForce) * band * uWeight, 0.0, 1.0);
-}`;
-
-// ripples → velocity: expanding concentric rings of radial force from a few drifting centres
-const RIPPLE_VEL = HEAD + `
-uniform sampler2D uVelocity;
-uniform float uTime, uWeight, uForce, uAspect;
-uniform vec2 uC0, uC1, uC2;
-vec2 ring(vec2 uv, vec2 c){
-  vec2 d = uv - c; d.x *= uAspect;
-  float r = length(d) + 1e-4;
-  float fall = exp(-r * r * 6.0);
-  float puls = 0.55 + 0.45 * sin(uTime * 1.2 + dot(c, vec2(9.0, 5.0)));
-  return (d / r) * sin(r * 40.0 - uTime * 3.5) * fall * puls;
-}
-void main(){
-  vec2 f = ring(vUv, uC0) + ring(vUv, uC1) + ring(vUv, uC2);
-  fragColor = vec4(texture(uVelocity, vUv).xy + f * uForce * uWeight, 0.0, 1.0);
-}`;
-
-// ripples → dye: a faint glow on the wave crests
-const RIPPLE_DYE = HEAD + `
-uniform sampler2D uSource;
-uniform float uTime, uWeight, uAspect;
-uniform vec3 uColor;
-uniform vec2 uC0, uC1, uC2;
-float crest(vec2 uv, vec2 c){
-  vec2 d = uv - c; d.x *= uAspect;
-  float r = length(d) + 1e-4;
-  float fall = exp(-r * r * 6.0);
-  float puls = 0.55 + 0.45 * sin(uTime * 1.2 + dot(c, vec2(9.0, 5.0)));
-  return max(sin(r * 40.0 - uTime * 3.5), 0.0) * fall * puls;
-}
-void main(){
-  float s = crest(vUv, uC0) + crest(vUv, uC1) + crest(vUv, uC2);
-  fragColor = vec4(texture(uSource, vUv).rgb + uColor * s * uWeight, 1.0);
-}`;
-
-// neural net → faint static edges (the graph structure); bright pulses are splatted on top from JS
-const NEURAL_EDGE = HEAD + `
-uniform sampler2D uSource;
-uniform float uWeight, uAspect;
-uniform vec3 uColor;
-uniform vec2 uN0, uN1, uN2, uN3, uN4, uN5, uN6;
-float seg(vec2 p, vec2 a, vec2 b){
-  p.x *= uAspect; a.x *= uAspect; b.x *= uAspect;
-  vec2 pa = p - a, ba = b - a;
-  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-  return length(pa - ba * h);
-}
-float edge(vec2 p, vec2 a, vec2 b){ float d = seg(p, a, b); return exp(-d * d * 5500.0); }
-void main(){
-  float g = edge(vUv, uN0, uN1) + edge(vUv, uN1, uN2) + edge(vUv, uN1, uN3) + edge(vUv, uN3, uN4)
-          + edge(vUv, uN3, uN5) + edge(vUv, uN5, uN6) + edge(vUv, uN4, uN6) + edge(vUv, uN0, uN3) + edge(vUv, uN2, uN4);
-  fragColor = vec4(texture(uSource, vUv).rgb + uColor * g * uWeight, 1.0);
 }`;
 
 function startSim(canvas: HTMLCanvasElement): void {
@@ -383,7 +285,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   const gradP = prog(GRADSUB, { uPressure: { value: null }, uVelocity: { value: null }, uTexel: { value: texelSim } });
   const prefilter = prog(PREFILTER, { uTexture: { value: null }, uThreshold: { value: 0.20 }, uKnee: { value: 0.12 } });
   const blur = prog(BLUR, { uTexture: { value: null }, uDir: { value: [0, 0] } });
-  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 }, uWaveAmt: { value: 0 }, uWaveAmp: { value: 0.11 }, uWaveBand: { value: 0.00004 }, uWaveCol: { value: [0.5, 0.72, 1.0] } });
+  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 } });
   const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 2.5 }, uScale: { value: 1.4 } });
 
   function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
@@ -400,14 +302,6 @@ function startSim(canvas: HTMLCanvasElement): void {
   // Ruri (lapis) blue only
   const LAPIS: [number, number, number] = [0.13, 0.26, 0.46];
   function lapis(j: number): [number, number, number] { return [LAPIS[0] * j, LAPIS[1] * j, LAPIS[2] * j]; }
-
-  // ---- motif emission programs (waveform + ripples) ----
-  const waveDye = prog(WAVE_DYE, { uSource: { value: null }, uTime: { value: 0 }, uAmp: { value: 0.11 }, uBand: { value: 0.0016 }, uWeight: { value: 0 }, uColor: { value: LAPIS } });
-  const waveVel = prog(WAVE_VEL, { uVelocity: { value: null }, uTime: { value: 0 }, uAmp: { value: 0.11 }, uBand: { value: 0.002 }, uForce: { value: 120 }, uWeight: { value: 0 } });
-  const ripVel = prog(RIPPLE_VEL, { uVelocity: { value: null }, uTime: { value: 0 }, uWeight: { value: 0 }, uForce: { value: 60 }, uAspect: { value: 1 }, uC0: { value: [0.3, 0.5] }, uC1: { value: [0.6, 0.4] }, uC2: { value: [0.5, 0.7] } });
-  const ripDye = prog(RIPPLE_DYE, { uSource: { value: null }, uTime: { value: 0 }, uWeight: { value: 0 }, uAspect: { value: 1 }, uColor: { value: LAPIS }, uC0: { value: [0.3, 0.5] }, uC1: { value: [0.6, 0.4] }, uC2: { value: [0.5, 0.7] } });
-  const neuralEdge = prog(NEURAL_EDGE, { uSource: { value: null }, uWeight: { value: 0 }, uAspect: { value: 1 }, uColor: { value: LAPIS }, uN0: { value: [0, 0] }, uN1: { value: [0, 0] }, uN2: { value: [0, 0] }, uN3: { value: [0, 0] }, uN4: { value: [0, 0] }, uN5: { value: [0, 0] }, uN6: { value: [0, 0] } });
-
   // several big soft sources spread across the screen (even broad smoke, no gradient wash)
   const NE = 6;
   const ebx = [0.20, 0.50, 0.80, 0.34, 0.68, 0.13];   // distributed across the whole screen
@@ -436,102 +330,6 @@ function startSim(canvas: HTMLCanvasElement): void {
   window.addEventListener('pointerup', (e) => { if (!e.isPrimary) return; if (input.down && Math.hypot(e.clientX - input.downX, e.clientY - input.downY) < 10 && performance.now() - input.downT < 250) input.tap = true; input.down = false; }, { passive: true });
 
   const SPLAT_FORCE = 3200;
-
-  // ---- motifs: same solver, different emission; slow random rotation with a crossfade, waveform featured ----
-  const MOTIFS = ['waveform', 'ripples', 'neural', 'diffusion', 'drift'];
-  const PICKW = [3.2, 1.3, 1.2, 1.0, 1.4];
-  const W: Record<string, number> = { waveform: 0, ripples: 0, neural: 0, diffusion: 0, drift: 0 };
-  function pickMotif(prev: string | null): string {
-    let tot = 0;
-    for (let i = 0; i < MOTIFS.length; i++) if (MOTIFS[i] !== prev) tot += PICKW[i];
-    let r = Math.random() * tot;
-    for (let i = 0; i < MOTIFS.length; i++) { if (MOTIFS[i] === prev) continue; r -= PICKW[i]; if (r <= 0) return MOTIFS[i]; }
-    return 'waveform';
-  }
-  let activeMotif = pickMotif(null);
-  W[activeMotif] = 1;
-  let nextSwitchT = 16 + Math.random() * 10;
-  // dev/preview hook: pin a motif (e.g. window.__fluidMotif('waveform')); stops rotation
-  (window as unknown as { __fluidMotif?: (m: string) => void }).__fluidMotif = (m: string) => {
-    if (!MOTIFS.includes(m)) return; activeMotif = m; nextSwitchT = 1e9;
-    for (let i = 0; i < MOTIFS.length; i++) W[MOTIFS[i]] = MOTIFS[i] === m ? 1 : 0;
-  };
-
-  // drift — the broad ambient "wind" sources
-  function emitDrift(w: number, T: number, fr: number) {
-    for (let i = 0; i < NE; i++) {
-      const ex = ebx[i] + 0.24 * Math.cos(T * 0.024 + eph[i]) + 0.10 * Math.cos(T * 0.055 + eph[i] * 1.7);
-      const ey = eby[i] + 0.21 * Math.sin(T * 0.028 + eph[i]) + 0.09 * Math.sin(T * 0.048 + eph[i] * 1.3);
-      const dvx = ex - epx[i], dvy = ey - epy[i];
-      epx[i] = ex; epy[i] = ey;
-      doSplat(ex, ey, (dvx * 2200 - dvy * 14) * w, (dvy * 2200 + dvx * 14) * w, lapis(0.016 * fr * w), 0.026);
-    }
-  }
-
-  // waveform (hero) — a speech-like oscilloscope line dissolving into smoke
-  function emitWaveform(w: number, T: number, fr: number, b: number) {
-    const wb = w * b;   // snap in (b≈1) → then dissolve (b→0): deposit + a velocity kick at the snap
-    waveDye.u.uTime.value = T; waveDye.u.uWeight.value = wb * 0.16 * fr; waveDye.u.uSource.value = dye.read.texture;
-    pass(waveDye, dye.write); dye.swap();
-    waveVel.u.uTime.value = T; waveVel.u.uWeight.value = wb * 1.4 * fr; waveVel.u.uVelocity.value = velocity.read.texture;
-    pass(waveVel, velocity.write); velocity.swap();
-  }
-
-  // ripples (さざなみ) — expanding rings of radial force + crest glow, from a few drifting centres
-  function emitRipples(w: number, T: number, fr: number) {
-    const asp = window.innerWidth / window.innerHeight;
-    const c0: [number, number] = [0.30 + 0.10 * Math.cos(T * 0.12), 0.52 + 0.09 * Math.sin(T * 0.10)];
-    const c1: [number, number] = [0.62 + 0.09 * Math.cos(T * 0.09 + 2.0), 0.40 + 0.10 * Math.sin(T * 0.13 + 1.0)];
-    const c2: [number, number] = [0.48 + 0.11 * Math.cos(T * 0.07 + 4.0), 0.70 + 0.08 * Math.sin(T * 0.11 + 3.0)];
-    ripVel.u.uTime.value = T; ripVel.u.uWeight.value = w * fr; ripVel.u.uAspect.value = asp;
-    ripVel.u.uC0.value = c0; ripVel.u.uC1.value = c1; ripVel.u.uC2.value = c2;
-    ripVel.u.uVelocity.value = velocity.read.texture; pass(ripVel, velocity.write); velocity.swap();
-    ripDye.u.uTime.value = T; ripDye.u.uWeight.value = w * 0.045 * fr; ripDye.u.uAspect.value = asp;
-    ripDye.u.uC0.value = c0; ripDye.u.uC1.value = c1; ripDye.u.uC2.value = c2;
-    ripDye.u.uSource.value = dye.read.texture; pass(ripDye, dye.write); dye.swap();
-  }
-
-  // neural net — pulses travel node→node along edges (leaving trails); nodes flash on arrival
-  const nbx = [0.20, 0.38, 0.30, 0.56, 0.72, 0.60, 0.84];
-  const nby = [0.60, 0.38, 0.22, 0.68, 0.32, 0.54, 0.46];
-  const nedges = [[0, 1], [1, 2], [1, 3], [3, 4], [3, 5], [5, 6], [4, 6], [0, 3], [2, 4]];
-  const npulses: { a: number; b: number; t: number; sp: number }[] = [];
-  let npTimer = 0;
-  const nodeX = (i: number, T: number) => nbx[i] + 0.03 * Math.cos(T * 0.21 + i * 1.7);
-  const nodeY = (i: number, T: number) => nby[i] + 0.03 * Math.sin(T * 0.18 + i * 2.3);
-  function emitNeural(w: number, T: number, dt: number, fr: number) {
-    // faint static graph (nodes + edges) so the network structure reads under the pulses
-    neuralEdge.u.uWeight.value = w * 0.012 * fr; neuralEdge.u.uAspect.value = window.innerWidth / window.innerHeight;
-    neuralEdge.u.uN0.value = [nodeX(0, T), nodeY(0, T)]; neuralEdge.u.uN1.value = [nodeX(1, T), nodeY(1, T)];
-    neuralEdge.u.uN2.value = [nodeX(2, T), nodeY(2, T)]; neuralEdge.u.uN3.value = [nodeX(3, T), nodeY(3, T)];
-    neuralEdge.u.uN4.value = [nodeX(4, T), nodeY(4, T)]; neuralEdge.u.uN5.value = [nodeX(5, T), nodeY(5, T)];
-    neuralEdge.u.uN6.value = [nodeX(6, T), nodeY(6, T)];
-    neuralEdge.u.uSource.value = dye.read.texture; pass(neuralEdge, dye.write); dye.swap();
-    npTimer -= dt;
-    if (npTimer <= 0 && npulses.length < 16) {
-      const e = nedges[(Math.random() * nedges.length) | 0];
-      npulses.push({ a: e[0], b: e[1], t: 0, sp: 0.6 + Math.random() * 0.7 });
-      npTimer = 0.08 + Math.random() * 0.18;
-    }
-    for (let i = npulses.length - 1; i >= 0; i--) {
-      const p = npulses[i]; p.t += dt * p.sp;
-      const ax = nodeX(p.a, T), ay = nodeY(p.a, T), bx = nodeX(p.b, T), by = nodeY(p.b, T);
-      const tt = Math.min(p.t, 1);
-      doSplat(ax + (bx - ax) * tt, ay + (by - ay) * tt, (bx - ax) * 150, (by - ay) * 150, lapis(0.11 * w), 0.007);
-      if (p.t >= 1) { doSplat(bx, by, 0, 0, lapis(0.2 * w), 0.012); npulses.splice(i, 1); }
-    }
-  }
-
-  // diffusion — a few concentrated seeds left to spread and dissolve
-  let diffTimer = 0;
-  function emitDiffusion(w: number, dt: number) {
-    diffTimer -= dt;
-    if (diffTimer <= 0) {
-      doSplat(0.14 + Math.random() * 0.72, 0.20 + Math.random() * 0.60, (Math.random() - 0.5) * 240, (Math.random() - 0.5) * 240, lapis(0.7 * w), 0.014);
-      diffTimer = 0.6 + Math.random() * 1.3;
-    }
-  }
-
   let visible = !document.hidden, inView = true, raf = 0;
   const t0 = performance.now();
   let prev = t0;
@@ -543,21 +341,16 @@ function startSim(canvas: HTMLCanvasElement): void {
     const T = (now - t0) / 1000;
 
     const fr = Math.min(dt * 60, 2);
-    // ---- motif rotation (smooth crossfade between emission regimes) ----
-    if (T > nextSwitchT) { activeMotif = pickMotif(activeMotif); nextSwitchT = T + 16 + Math.random() * 10; }
-    const wr = 1 - Math.exp(-dt / 3.0);
-    for (let i = 0; i < MOTIFS.length; i++) { const k = MOTIFS[i]; W[k] += ((k === activeMotif ? 1 : 0) - W[k]) * wr; }
-    const wburst = Math.exp(-((T % 3.2) / 3.2) * 4.0);   // waveform: snap in, then dissolve into the fluid
-    // ---- broad ambient flow — eased back under structured motifs so their shape survives ----
-    forceP.u.uVelocity.value = velocity.read.texture; forceP.u.uTime.value = T;
-    forceP.u.uAmt.value = 2.5 * (1 - 0.82 * W.waveform - 0.55 * W.ripples - 0.72 * W.neural);
-    pass(forceP, velocity.write); velocity.swap();
-    // ---- per-motif emission ----
-    if (W.drift > 0.01) emitDrift(W.drift, T, fr);
-    if (W.waveform > 0.01) emitWaveform(W.waveform, T, fr, wburst);
-    if (W.ripples > 0.01) emitRipples(W.ripples, T, fr);
-    if (W.neural > 0.01) emitNeural(W.neural, T, dt, fr);
-    if (W.diffusion > 0.01) emitDiffusion(W.diffusion, dt);
+    // ---- a gentle, relaxed broad flow (おおらか) ----
+    forceP.u.uVelocity.value = velocity.read.texture; forceP.u.uTime.value = T; pass(forceP, velocity.write); velocity.swap();
+    // ---- several big soft sources drifting across the screen → even broad smoke, no gradient wash ----
+    for (let i = 0; i < NE; i++) {
+      const ex = ebx[i] + 0.24 * Math.cos(T * 0.024 + eph[i]) + 0.10 * Math.cos(T * 0.055 + eph[i] * 1.7);
+      const ey = eby[i] + 0.21 * Math.sin(T * 0.028 + eph[i]) + 0.09 * Math.sin(T * 0.048 + eph[i] * 1.3);
+      const dvx = ex - epx[i], dvy = ey - epy[i];
+      epx[i] = ex; epy[i] = ey;
+      doSplat(ex, ey, dvx * 2200 - dvy * 14, dvy * 2200 + dvx * 14, lapis(0.016 * fr), 0.026);  // big soft source, broad wind
+    }
     // ---- cursor: a big soft local source on top, only when present ----
     if ((now - input.lastMove) < 650) {
       emitX += (input.x - emitX) * (1 - Math.exp(-16 * dt));
@@ -593,7 +386,6 @@ function startSim(canvas: HTMLCanvasElement): void {
     display.u.uDye.value = dye.read.texture; display.u.uBloom.value = bloom.read.texture;
     display.u.uReveal.value = Math.min(1, display.u.uReveal.value + dt / 1.2);
     display.u.uTime.value = T;
-    display.u.uWaveAmt.value = W.waveform * wburst * 0.95;
     pass(display, null);
 
     if (!canvas.classList.contains('is-live')) canvas.classList.add('is-live');
