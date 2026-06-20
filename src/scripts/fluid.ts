@@ -187,6 +187,8 @@ void main(){
   c += texture(uBloom, vUv).rgb * uBloomAmt;
   vec2 p = vUv - 0.5; p.x *= uResolution.x / uResolution.y;
   c *= smoothstep(1.35, 0.25, length(p));               // gentle vignette
+  vec2 td = (vUv - vec2(0.20, 0.5)) / vec2(0.34, 0.26);  // soft elliptical region over the text block
+  c *= mix(0.5, 1.0, smoothstep(0.5, 1.3, length(td)));  // thin the smoke there (no box: black stays black)
   float gr = fract(sin(dot(vUv * uResolution + fract(uTime), vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
   c += gr * 0.006;
   fragColor = vec4(c * uReveal, 1.0);
@@ -284,7 +286,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   const prefilter = prog(PREFILTER, { uTexture: { value: null }, uThreshold: { value: 0.20 }, uKnee: { value: 0.12 } });
   const blur = prog(BLUR, { uTexture: { value: null }, uDir: { value: [0, 0] } });
   const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 } });
-  const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 2.5 }, uScale: { value: 2.1 } });
+  const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 2.5 }, uScale: { value: 1.4 } });
 
   function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
     renderer.render({ scene: p.mesh, target: target ?? undefined });
@@ -312,10 +314,10 @@ function startSim(canvas: HTMLCanvasElement): void {
   const input = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, moved: false, down: false, tap: false, downX: 0, downY: 0, downT: 0, lastMove: -1e4 };
   const PT: [number, number] = [0, 0];
 
-  function doSplat(x: number, y: number, dx: number, dy: number, color: [number, number, number]) {
+  function doSplat(x: number, y: number, dx: number, dy: number, color: [number, number, number], radius = 0.008) {
     const aspect = window.innerWidth / window.innerHeight;
     PT[0] = x; PT[1] = y;
-    splat.u.uPoint.value = PT; splat.u.uAspect.value = aspect; splat.u.uRadius.value = 0.008;
+    splat.u.uPoint.value = PT; splat.u.uAspect.value = aspect; splat.u.uRadius.value = radius;
     splat.u.uColor.value = [dx, dy, 0];
     splat.u.uSource.value = velocity.read.texture; pass(splat, velocity.write); velocity.swap();
     splat.u.uColor.value = color;
@@ -347,13 +349,13 @@ function startSim(canvas: HTMLCanvasElement): void {
       const ey = eby[i] + 0.21 * Math.sin(T * 0.028 + eph[i]) + 0.09 * Math.sin(T * 0.048 + eph[i] * 1.3);
       const dvx = ex - epx[i], dvy = ey - epy[i];
       epx[i] = ex; epy[i] = ey;
-      doSplat(ex, ey, dvx * 2200 - dvy * 14, dvy * 2200 + dvx * 14, lapis(0.034 * fr));
+      doSplat(ex, ey, dvx * 2200 - dvy * 14, dvy * 2200 + dvx * 14, lapis(0.016 * fr), 0.026);  // big soft source, broad wind
     }
     // ---- cursor: a big soft local source on top, only when present ----
     if ((now - input.lastMove) < 650) {
       emitX += (input.x - emitX) * (1 - Math.exp(-16 * dt));
       emitY += (input.y - emitY) * (1 - Math.exp(-16 * dt));
-      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis(0.10 * fr));
+      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis(0.07 * fr), 0.016);
     } else { emitX = input.x; emitY = input.y; }
     prevEmitX = emitX; prevEmitY = emitY;
     input.moved = false;
@@ -370,7 +372,7 @@ function startSim(canvas: HTMLCanvasElement): void {
     advect.u.uTexel.value = texelSim; advect.u.uDt.value = dt;
     advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = velocity.read.texture; advect.u.uDissipation.value = 0.45;
     pass(advect, velocity.write); velocity.swap();
-    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDissipation.value = 0.14;
+    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDissipation.value = 0.20;
     pass(advect, dye.write); dye.swap();
 
     // ---- bloom (prefilter → separable blur) ----
