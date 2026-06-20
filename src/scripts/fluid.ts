@@ -216,7 +216,7 @@ const FORCE = HEAD + HASH + NOISE + `
 uniform sampler2D uVelocity;
 uniform float uTime, uAmt, uScale;
 void main(){
-  vec2 p = vUv * uScale + vec2(uTime * 0.020, uTime * 0.015);
+  vec2 p = vUv * uScale + vec2(uTime * 0.013, uTime * 0.010);
   float e = 0.07;
   vec2 f = vec2(fbm(p + vec2(0.0, e)) - fbm(p - vec2(0.0, e)),
              -(fbm(p + vec2(e, 0.0)) - fbm(p - vec2(e, 0.0)))) / (2.0 * e);
@@ -277,14 +277,14 @@ function startSim(canvas: HTMLCanvasElement): void {
   const advect = prog(ADVECT, { uVelocity: { value: null }, uSource: { value: null }, uTexel: { value: texelSim }, uDt: { value: 0.016 }, uDissipation: { value: 0.2 } });
   const diverg = prog(DIVERGENCE, { uVelocity: { value: null }, uTexel: { value: texelSim } });
   const curlP = prog(CURL, { uVelocity: { value: null }, uTexel: { value: texelSim } });
-  const vortP = prog(VORTICITY, { uVelocity: { value: null }, uCurl: { value: null }, uTexel: { value: texelSim }, uCurlAmt: { value: 16 }, uDt: { value: 0.016 } });
+  const vortP = prog(VORTICITY, { uVelocity: { value: null }, uCurl: { value: null }, uTexel: { value: texelSim }, uCurlAmt: { value: 8 }, uDt: { value: 0.016 } });
   const clearP = prog(CLEARP, { uTex: { value: null }, uValue: { value: 0.8 } });
   const press = prog(PRESSURE, { uPressure: { value: null }, uDivergence: { value: null }, uTexel: { value: texelSim } });
   const gradP = prog(GRADSUB, { uPressure: { value: null }, uVelocity: { value: null }, uTexel: { value: texelSim } });
   const prefilter = prog(PREFILTER, { uTexture: { value: null }, uThreshold: { value: 0.20 }, uKnee: { value: 0.12 } });
   const blur = prog(BLUR, { uTexture: { value: null }, uDir: { value: [0, 0] } });
   const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 } });
-  const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 7 }, uScale: { value: 2.1 } });
+  const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 2.5 }, uScale: { value: 2.1 } });
 
   function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
     renderer.render({ scene: p.mesh, target: target ?? undefined });
@@ -302,7 +302,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   function lapis(j: number): [number, number, number] { return [LAPIS[0] * j, LAPIS[1] * j, LAPIS[2] * j]; }
   // several big soft sources spread across the screen (even broad smoke, no gradient wash)
   const NE = 6;
-  const ebx = [0.20, 0.50, 0.80, 0.34, 0.68, 0.13];
+  const ebx = [0.20, 0.50, 0.80, 0.34, 0.68, 0.13];   // distributed across the whole screen
   const eby = [0.34, 0.64, 0.26, 0.78, 0.70, 0.54];
   const eph = [0.0, 1.1, 2.3, 3.5, 4.7, 5.9];
   const epx = ebx.slice(), epy = eby.slice();
@@ -343,11 +343,11 @@ function startSim(canvas: HTMLCanvasElement): void {
     forceP.u.uVelocity.value = velocity.read.texture; forceP.u.uTime.value = T; pass(forceP, velocity.write); velocity.swap();
     // ---- several big soft sources drifting across the screen → even broad smoke, no gradient wash ----
     for (let i = 0; i < NE; i++) {
-      const ex = ebx[i] + 0.12 * Math.cos(T * 0.09 + eph[i]) + 0.05 * Math.cos(T * 0.21 + eph[i] * 1.7);
-      const ey = eby[i] + 0.10 * Math.sin(T * 0.11 + eph[i]) + 0.04 * Math.sin(T * 0.18 + eph[i] * 1.3);
+      const ex = ebx[i] + 0.12 * Math.cos(T * 0.058 + eph[i]) + 0.05 * Math.cos(T * 0.135 + eph[i] * 1.7);
+      const ey = eby[i] + 0.10 * Math.sin(T * 0.070 + eph[i]) + 0.04 * Math.sin(T * 0.115 + eph[i] * 1.3);
       const dvx = ex - epx[i], dvy = ey - epy[i];
       epx[i] = ex; epy[i] = ey;
-      doSplat(ex, ey, dvx * 5200 - dvy * 28, dvy * 5200 + dvx * 28, lapis(0.032 * fr));
+      doSplat(ex, ey, dvx * 2200 - dvy * 14, dvy * 2200 + dvx * 14, lapis(0.034 * fr));
     }
     // ---- cursor: a big soft local source on top, only when present ----
     if ((now - input.lastMove) < 650) {
@@ -368,9 +368,9 @@ function startSim(canvas: HTMLCanvasElement): void {
     for (let i = 0; i < N; i++) { press.u.uPressure.value = pressure.read.texture; pass(press, pressure.write); pressure.swap(); }
     gradP.u.uPressure.value = pressure.read.texture; gradP.u.uVelocity.value = velocity.read.texture; pass(gradP, velocity.write); velocity.swap();
     advect.u.uTexel.value = texelSim; advect.u.uDt.value = dt;
-    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = velocity.read.texture; advect.u.uDissipation.value = 0.18;
+    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = velocity.read.texture; advect.u.uDissipation.value = 0.45;
     pass(advect, velocity.write); velocity.swap();
-    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDissipation.value = 0.24;
+    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDissipation.value = 0.14;
     pass(advect, dye.write); dye.swap();
 
     // ---- bloom (prefilter → separable blur) ----
