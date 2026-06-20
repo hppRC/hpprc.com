@@ -192,6 +192,37 @@ void main(){
   fragColor = vec4(c * uReveal, 1.0);
 }`;
 
+const HASH = `float hash(vec2 p){ p = fract(p * vec2(123.34, 345.45)); p += dot(p, p + 34.345); return fract(p.x * p.y); }`;
+const NOISE = `
+float vn(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash(i), b = hash(i + vec2(1.0,0.0)), c = hash(i + vec2(0.0,1.0)), d = hash(i + vec2(1.0,1.0));
+  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y); }
+float fbm(vec2 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * vn(p); p = p * 2.03 + vec2(11.3, 7.7); a *= 0.5; } return v; }`;
+
+// even dye source across the whole screen, modulated by a large-scale slow cloud field
+const DYESOURCE = HEAD + HASH + NOISE + `
+uniform sampler2D uSource;
+uniform float uTime, uAmt;
+uniform vec3 uColor;
+void main(){
+  float big = fbm(vUv * 1.9 + vec2(uTime * 0.028, -uTime * 0.020));   // broad cloud cover
+  float fine = fbm(vUv * 5.4 + vec2(-uTime * 0.045, uTime * 0.05));   // smoky fine structure
+  float n = smoothstep(0.34, 0.92, big) * (0.45 + 0.55 * fine);
+  fragColor = vec4(texture(uSource, vUv).xyz + uColor * n * uAmt, 1.0);
+}`;
+
+// big, relaxed, divergence-free flow over the whole field (おおらか — broad eddies, not thin jets)
+const FORCE = HEAD + HASH + NOISE + `
+uniform sampler2D uVelocity;
+uniform float uTime, uAmt, uScale;
+void main(){
+  vec2 p = vUv * uScale + vec2(uTime * 0.020, uTime * 0.015);
+  float e = 0.07;
+  vec2 f = vec2(fbm(p + vec2(0.0, e)) - fbm(p - vec2(0.0, e)),
+             -(fbm(p + vec2(e, 0.0)) - fbm(p - vec2(e, 0.0)))) / (2.0 * e);
+  fragColor = vec4(texture(uVelocity, vUv).xy + f * uAmt, 0.0, 1.0);
+}`;
+
 function startSim(canvas: HTMLCanvasElement): void {
   const isCoarse = matchMedia('(pointer: coarse)').matches;
   const dpr = Math.min(window.devicePixelRatio || 1, isCoarse ? 1.25 : 1.5);
@@ -253,6 +284,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   const prefilter = prog(PREFILTER, { uTexture: { value: null }, uThreshold: { value: 0.20 }, uKnee: { value: 0.12 } });
   const blur = prog(BLUR, { uTexture: { value: null }, uDir: { value: [0, 0] } });
   const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 } });
+  const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 7 }, uScale: { value: 2.1 } });
 
   function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
     renderer.render({ scene: p.mesh, target: target ?? undefined });
@@ -268,7 +300,13 @@ function startSim(canvas: HTMLCanvasElement): void {
   // Ruri (lapis) blue only
   const LAPIS: [number, number, number] = [0.13, 0.26, 0.46];
   function lapis(j: number): [number, number, number] { return [LAPIS[0] * j, LAPIS[1] * j, LAPIS[2] * j]; }
-  // a single always-on emitter: follows the cursor when present, else a slow regular orbit
+  // several big soft sources spread across the screen (even broad smoke, no gradient wash)
+  const NE = 6;
+  const ebx = [0.20, 0.50, 0.80, 0.34, 0.68, 0.13];
+  const eby = [0.34, 0.64, 0.26, 0.78, 0.70, 0.54];
+  const eph = [0.0, 1.1, 2.3, 3.5, 4.7, 5.9];
+  const epx = ebx.slice(), epy = eby.slice();
+  // the cursor adds one more local source when present
   let emitX = 0.5, emitY = 0.5, prevEmitX = 0.5, prevEmitY = 0.5;
 
   const input = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, moved: false, down: false, tap: false, downX: 0, downY: 0, downT: 0, lastMove: -1e4 };
@@ -277,7 +315,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   function doSplat(x: number, y: number, dx: number, dy: number, color: [number, number, number]) {
     const aspect = window.innerWidth / window.innerHeight;
     PT[0] = x; PT[1] = y;
-    splat.u.uPoint.value = PT; splat.u.uAspect.value = aspect; splat.u.uRadius.value = 0.0024;
+    splat.u.uPoint.value = PT; splat.u.uAspect.value = aspect; splat.u.uRadius.value = 0.008;
     splat.u.uColor.value = [dx, dy, 0];
     splat.u.uSource.value = velocity.read.texture; pass(splat, velocity.write); velocity.swap();
     splat.u.uColor.value = color;
@@ -300,29 +338,24 @@ function startSim(canvas: HTMLCanvasElement): void {
     dt = Math.min(Math.max(dt, 1 / 120), 1 / 30);
     const T = (now - t0) / 1000;
 
-    // ---- one always-on emitter (cursor strength) — follows the cursor, else a slow regular orbit ----
-    const active = (now - input.lastMove) < 650;
-    let tgtX: number, tgtY: number;
-    if (active) { tgtX = input.x; tgtY = input.y; }
-    else {
-      tgtX = 0.5 + 0.30 * Math.cos(T * 0.17) + 0.08 * Math.cos(T * 0.39 + 1.3);
-      tgtY = 0.5 + 0.24 * Math.sin(T * 0.14) + 0.06 * Math.sin(T * 0.33 + 0.7);
-    }
-    const follow = 1 - Math.exp(-(active ? 18.0 : 7.0) * dt);
-    emitX += (tgtX - emitX) * follow;
-    emitY += (tgtY - emitY) * follow;
-    const evx = emitX - prevEmitX, evy = emitY - prevEmitY;
-    prevEmitX = emitX; prevEmitY = emitY;
     const fr = Math.min(dt * 60, 2);
-    const sp = Math.hypot(evx, evy);
-    let fx: number, fy: number;
-    if (active) { fx = evx * SPLAT_FORCE; fy = evy * SPLAT_FORCE; }
-    else {
-      const ux = sp > 1e-6 ? evx / sp : 1, uy = sp > 1e-6 ? evy / sp : 0;
-      fx = (ux * 0.7 - uy * 0.7) * 70;     // gentle stir + swirl along the orbit (calm, not windy)
-      fy = (uy * 0.7 + ux * 0.7) * 70;
+    // ---- a gentle, relaxed broad flow (おおらか) ----
+    forceP.u.uVelocity.value = velocity.read.texture; forceP.u.uTime.value = T; pass(forceP, velocity.write); velocity.swap();
+    // ---- several big soft sources drifting across the screen → even broad smoke, no gradient wash ----
+    for (let i = 0; i < NE; i++) {
+      const ex = ebx[i] + 0.12 * Math.cos(T * 0.09 + eph[i]) + 0.05 * Math.cos(T * 0.21 + eph[i] * 1.7);
+      const ey = eby[i] + 0.10 * Math.sin(T * 0.11 + eph[i]) + 0.04 * Math.sin(T * 0.18 + eph[i] * 1.3);
+      const dvx = ex - epx[i], dvy = ey - epy[i];
+      epx[i] = ex; epy[i] = ey;
+      doSplat(ex, ey, dvx * 5200 - dvy * 28, dvy * 5200 + dvx * 28, lapis(0.032 * fr));
     }
-    doSplat(emitX, emitY, fx, fy, lapis(0.13 * fr)); // continuous, slow, long-lasting, same brightness idle/active
+    // ---- cursor: a big soft local source on top, only when present ----
+    if ((now - input.lastMove) < 650) {
+      emitX += (input.x - emitX) * (1 - Math.exp(-16 * dt));
+      emitY += (input.y - emitY) * (1 - Math.exp(-16 * dt));
+      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis(0.10 * fr));
+    } else { emitX = input.x; emitY = input.y; }
+    prevEmitX = emitX; prevEmitY = emitY;
     input.moved = false;
 
     // ---- fluid step ----
@@ -337,7 +370,7 @@ function startSim(canvas: HTMLCanvasElement): void {
     advect.u.uTexel.value = texelSim; advect.u.uDt.value = dt;
     advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = velocity.read.texture; advect.u.uDissipation.value = 0.18;
     pass(advect, velocity.write); velocity.swap();
-    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDissipation.value = 0.16;
+    advect.u.uVelocity.value = velocity.read.texture; advect.u.uSource.value = dye.read.texture; advect.u.uDissipation.value = 0.24;
     pass(advect, dye.write); dye.swap();
 
     // ---- bloom (prefilter → separable blur) ----
