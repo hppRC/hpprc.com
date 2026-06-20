@@ -1,0 +1,295 @@
+/* =========================================================================
+   hpprc.com — global styles
+   Original work. Design *principles* (one easing token, mono-as-metadata,
+   rationed single accent, run-once reveals, restraint) are common craft;
+   all values, palette, type and motion here are our own.
+   ========================================================================= */
+
+/* ---- self-hosted Latin variable fonts (weight axis only, no italic) ---- */
+@font-face {
+  font-family: 'Geist';
+  src: url('/fonts/geist-sans.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/geist-mono.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* metric-matched fallback → near-zero CLS while Geist swaps in */
+@font-face {
+  font-family: 'Geist Fallback';
+  src: local('Arial'), local('Helvetica Neue'), local('Helvetica');
+  size-adjust: 97%;
+  ascent-override: 93%;
+  descent-override: 23%;
+  line-gap-override: 0%;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* motion — our own curves from the standard ease-out family (no overshoot) */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);      /* primary: decelerated arrival */
+  --ease-soft: cubic-bezier(0.25, 1, 0.5, 1); /* secondary: gentle crossfades  */
+  --t-fast: 0.2s;   /* hover / state            */
+  --t-base: 0.5s;   /* element + row reveals     */
+  --t-slow: 1.1s;   /* load ceremony, fluid bloom*/
+  --t-mult: 1;      /* global speed knob         */
+
+  /* palette — near-black ground, warm off-white ink, one lapis accent (Ruri) */
+  --ink-base: #0a0b0d;
+  --ink-deep: #08090c;
+  --ink-surface: #111317;
+  --ink-surface-2: #171a1f;
+  --hairline: #23252b;
+  --hairline-strong: #34373f;
+
+  --paper: #eceae3;
+  --paper-dim: #9a9c9b;
+  --paper-mute: #6a6d6c;
+  --paper-faint: #43464b;
+
+  --lapis: #3e6cae;       /* working accent (affordances)        */
+  --lapis-deep: #2e5b9e;  /* the Ruri 瑠璃 reference value        */
+  --lapis-dim: #21436f;
+  --focus: #6b95d6;
+
+  /* type */
+  --font-sans: 'Geist', 'Geist Fallback', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, 'Cascadia Mono', Consolas, monospace;
+
+  --fs-hero: clamp(2.5rem, 6.4vw, 5rem);
+  --fs-h2: 1.4rem;
+  --fs-body: 1.0625rem;
+  --fs-meta: 0.8125rem;
+  --fs-label: 0.6875rem;
+
+  --measure: 46rem;
+  --gutter: clamp(1.25rem, 5vw, 4rem);
+
+  /* the static poster — LCP-safe, the no-JS / reduced-motion / no-WebGL ground */
+  --poster: radial-gradient(135% 130% at 22% 12%, #14161b 0%, #0b0c10 52%, #08090c 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-mult: 0; }
+}
+
+/* ---- reset ---- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+  color: var(--paper);
+  background-color: var(--ink-deep);
+  background-image: var(--poster);
+  background-attachment: fixed;
+  min-height: 100svh;
+  font-feature-settings: 'kern' 1;
+  overflow-x: hidden;
+}
+
+/* the WebGL field sits behind everything and never eats pointer/scroll */
+#fluid {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  display: block;
+  pointer-events: none;
+  /* slow handoff from poster to canvas; reduced-motion users never see motion */
+  opacity: 0;
+  transition: opacity var(--t-slow) var(--ease-soft);
+}
+#fluid.is-live { opacity: 1; }
+
+::selection { background: color-mix(in srgb, var(--lapis) 38%, transparent); color: var(--paper); }
+
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 1px; }
+
+/* ---- layout ---- */
+.wrap { width: 100%; max-width: var(--measure); margin-inline: auto; padding-inline: var(--gutter); }
+
+main > section { padding-block: clamp(4.5rem, 12vh, 9rem); }
+main > section + section { border-top: 1px solid var(--hairline); }
+
+/* section kicker: mono index + label, then a hairline that draws in */
+.kicker {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-mute);
+  margin-bottom: 2.25rem;
+}
+.kicker .num { color: var(--lapis-deep); }
+.kicker::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--hairline-strong);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--t-base) var(--ease);
+  transition-delay: 0.05s;
+}
+.is-in .kicker::after { transform: scaleX(1); }
+
+/* ---- hero ---- */
+.hero { min-height: 100svh; display: flex; flex-direction: column; justify-content: center; padding-block: 8svh; }
+.hero-name {
+  font-size: var(--fs-hero);
+  font-weight: 560;
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  color: var(--paper);
+}
+.hero-role {
+  margin-top: 1.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  letter-spacing: 0.01em;
+  color: var(--paper-dim);
+}
+.hero-role .sep { color: var(--paper-faint); padding-inline: 0.4em; }
+.hero-summary {
+  margin-top: 1.75rem;
+  max-width: 34rem;
+  font-size: 1.15rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--paper) 88%, transparent);
+}
+.hero-links {
+  margin-top: 2.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+}
+.hero-cap {
+  margin-top: 4rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--paper-faint);
+}
+
+/* ---- links (rationed accent: the underline is the signal) ---- */
+.link {
+  position: relative;
+  color: var(--paper);
+  text-decoration: none;
+  transition: color var(--t-fast) var(--ease);
+}
+.link::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: -2px;
+  height: 1px;
+  background: var(--lapis);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--t-fast) var(--ease);
+}
+.link:hover::after, .link:focus-visible::after { transform: scaleX(1); }
+.link--mute { color: var(--paper-dim); }
+.link--mute:hover { color: var(--paper); }
+
+/* ---- statement ---- */
+.statement { font-size: 1.4rem; line-height: 1.55; max-width: 38rem; color: color-mix(in srgb, var(--paper) 92%, transparent); }
+.statement b { font-weight: 560; color: var(--paper); }
+
+/* ---- publications index ---- */
+.pubs { list-style: none; }
+.pub {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr;
+  gap: 0.25rem 1.25rem;
+  padding: 1.4rem 1rem 1.4rem 0.75rem;
+  margin-inline: -0.75rem;
+  border-radius: 2px;
+  border-bottom: 1px solid var(--hairline);
+  transition: background-color var(--t-fast) var(--ease);
+}
+.pub:first-child { border-top: 1px solid var(--hairline); }
+.pub:hover { background-color: var(--ink-surface); }
+.pub-num { grid-row: span 2; font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--paper-mute); padding-top: 0.15rem; transition: color var(--t-fast) var(--ease); }
+.pub:hover .pub-num { color: var(--lapis); }
+.pub-title { font-size: 1.0625rem; font-weight: 500; line-height: 1.4; color: var(--paper); }
+.pub-meta { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--paper-dim); line-height: 1.5; }
+.pub-meta b { color: var(--paper); font-weight: 560; }
+.pub-links { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin-top: 0.5rem; font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: 0.04em; text-transform: uppercase; }
+.venue { display: inline-block; font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: 0.04em; color: var(--paper-mute); border: 1px solid var(--hairline-strong); border-radius: 2px; padding: 0.05em 0.45em; }
+.pubs-full { margin-top: 2rem; font-family: var(--font-mono); font-size: var(--fs-meta); }
+
+/* ---- projects ---- */
+.projects { list-style: none; display: grid; gap: 1.5rem; }
+.project { display: grid; gap: 0.3rem; }
+.project-name { font-family: var(--font-mono); font-size: 1rem; color: var(--paper); }
+.project-desc { font-size: var(--fs-meta); color: var(--paper-dim); line-height: 1.5; }
+.project-links { display: flex; gap: 1rem; margin-top: 0.15rem; font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* ---- elsewhere / contact ---- */
+.colophon-links { display: flex; flex-wrap: wrap; gap: 0.6rem 1.75rem; font-family: var(--font-mono); font-size: var(--fs-meta); }
+.contact-line { margin-bottom: 1.75rem; font-size: 1.15rem; line-height: 1.5; max-width: 34rem; color: color-mix(in srgb, var(--paper) 90%, transparent); }
+
+/* ---- footer / colophon ---- */
+.foot { padding-block: 4rem 5rem; border-top: 1px solid var(--hairline); }
+.foot-meta { font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: 0.04em; color: var(--paper-mute); display: flex; flex-wrap: wrap; gap: 0.4rem 1.25rem; }
+.foot-note { margin-top: 1.25rem; font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--paper-faint); max-width: 30rem; line-height: 1.7; }
+
+/* ---- corner section index ---- */
+.cindex { position: fixed; right: clamp(1rem, 3vw, 2rem); bottom: clamp(1rem, 3vw, 2rem); z-index: 5; display: flex; flex-direction: column; gap: 0.5rem; font-family: var(--font-mono); font-size: var(--fs-label); letter-spacing: 0.08em; opacity: 0; transition: opacity var(--t-base) var(--ease); pointer-events: none; }
+.cindex.is-shown { opacity: 1; }
+.cindex a { color: var(--paper-faint); text-decoration: none; pointer-events: auto; transition: color var(--t-fast) var(--ease); }
+.cindex a[aria-current='true'] { color: var(--lapis); }
+@media (max-width: 640px) { .cindex { display: none; } }
+
+/* clipboard feedback */
+.copied { position: relative; }
+.copied[data-copied]::after { content: attr(data-copied); margin-left: 0.6em; color: var(--lapis); font-size: var(--fs-label); letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* =========================================================================
+   motion: run-once reveals (progressive enhancement — only when JS is on)
+   ========================================================================= */
+.js .reveal { opacity: 0; transform: translateY(14px); transition: opacity var(--t-base) var(--ease), transform var(--t-base) var(--ease); }
+.js .reveal.is-in { opacity: 1; transform: none; }
+
+.js .hero-name { opacity: 0; transform: translateY(0.32em); transition: opacity var(--t-slow) var(--ease-soft), transform var(--t-slow) var(--ease-soft); }
+.js .hero.is-in .hero-name { opacity: 1; transform: none; }
+.js .hero.is-in .hero-role { transition: opacity var(--t-base) var(--ease) 0.18s, transform var(--t-base) var(--ease) 0.18s; }
+.js .hero.is-in .hero-summary { transition-delay: 0.28s; }
+.js .hero.is-in .hero-links { transition-delay: 0.38s; }
+.js .hero.is-in .hero-cap { transition-delay: 0.5s; }
+
+/* when --t-mult is 0 (reduced motion) durations collapse → instant, no shift */
+@media (prefers-reduced-motion: reduce) {
+  .js .reveal, .js .hero-name { transition: none; opacity: 1; transform: none; }
+  #fluid { transition: none; }
+}
+
+@media (max-width: 540px) {
+  .pub { grid-template-columns: 1.75rem 1fr; }
+  .hero-summary { font-size: 1.05rem; }
+}

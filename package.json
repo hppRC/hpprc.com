@@ -1,0 +1,21 @@
+{
+  "name": "hpprc.com",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "astro": "^6.0.0",
+    "ogl": "^1.0.0"
+  },
+  "devDependencies": {
+    "@fontsource-variable/geist": "^5.0.0",
+    "@fontsource-variable/geist-mono": "^5.0.0",
+    "playwright": "^1.61.0"
+  }
+}

@@ -1,0 +1,19 @@
+# build output
+dist/
+# generated types
+.astro/
+# dependencies
+node_modules/
+# logs
+npm-debug.log*
+# macOS
+.DS_Store
+# local env
+.env
+.env.production
+
+# research artifacts (keep the .md dossier + tools, drop bulky/transient outputs)
+.agents/research/p5aholic-extract/
+.agents/research/_verify/
+.agents/research/*.log
+.agents/research/_codex-*-prompt.txt
