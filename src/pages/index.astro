@@ -6,7 +6,7 @@ const links = [
   { label: 'GitHub', href: 'https://github.com/hppRC' },
   { label: 'Scholar', href: 'https://scholar.google.com/citations?user=3xeQ7VYAAAAJ' },
   { label: 'Hugging Face', href: 'https://huggingface.co/hpprc' },
-  { label: 'X', href: 'https://x.com/hayato_tkgs' },
+  { label: 'X (Twitter)', href: 'https://x.com/hpp_ricecake' },
   { label: 'hpprc.dev ↗', href: 'https://hpprc.dev' },
 ];
 ---
@@ -16,18 +16,16 @@ const links = [
     <div class="hero-inner">
       <h1 class="hero-name">Hayato Tsukagoshi</h1>
       <p class="hero-role reveal">
-        ML Engineer, Kotoba Technologies<span class="sep">/</span>PhD, Nagoya University
+        ML Engineer, Kotoba Technologies Japan<span class="sep">/</span>PhD, Nagoya University
       </p>
       <p class="hero-summary reveal">
-        Sentence embeddings and representation learning — now turning to speech.
+        Pre- and post-training of speech models — TTS, ASR, speech-to-speech — and large-scale training of text embeddings.
       </p>
       <nav class="hero-links reveal" aria-label="Links">
         {links.map((l) => <a class="link" href={l.href} rel="me noopener" target="_blank">{l.label}</a>)}
-        <!-- TODO confirm public email -->
         <button class="link copied" id="email" type="button"
-          data-user="research.tsukagoshi.hayato" data-domain="gmail.com" aria-label="Reveal email">Email</button>
+          data-user="hpp.ricecake" data-domain="gmail.com" aria-label="Reveal email">Email</button>
       </nav>
-      <p class="hero-cap reveal">latent flow · advection — diffusion</p>
     </div>
   </main>
 </Base>

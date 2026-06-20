@@ -116,6 +116,7 @@ body {
   font-weight: 560;
   line-height: 1.0;
   letter-spacing: -0.028em;
+  margin-left: -0.05em;   /* optical: pull the cap "H" side-bearing back to the text edge below */
   color: var(--paper);
 }
 .hero-role {
