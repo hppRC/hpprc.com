@@ -197,6 +197,7 @@ void main(){
   c *= mix(uTextDim, 1.0, smoothstep(0.5, 1.3, length(td)));  // thin the smoke there (no box: black stays black)
   float gr = fract(sin(dot(vUv * uResolution + fract(uTime), vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
   c += gr * 0.006;
+  c *= 0.84;                              // global gain: pull the overall peak brightness down a little
   fragColor = vec4(c * uReveal, 1.0);
 }`;
 
@@ -443,7 +444,7 @@ function startSim(canvas: HTMLCanvasElement): void {
       emitY += (input.y - emitY) * (1 - Math.exp(-16 * dt));
       // bright dye on the cursor so it crosses the bloom threshold and reads as a luminous,
       // glowing trail — the main sense of interaction (mobile stays a touch gentler)
-      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis((0.06 + 0.13 * srcSize) * fr), 0.0095 * srcSize);
+      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis((0.05 + 0.09 * srcSize) * fr), 0.0095 * srcSize);
       cursorActive = true;
     } else { emitX = input.x; emitY = input.y; cursorActive = false; }
     prevEmitX = emitX; prevEmitY = emitY;
