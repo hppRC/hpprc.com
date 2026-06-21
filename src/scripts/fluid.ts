@@ -429,7 +429,8 @@ function startSim(canvas: HTMLCanvasElement): void {
       if (!cursorActive) { emitX = prevEmitX = input.x; emitY = prevEmitY = input.y; }
       emitX += (input.x - emitX) * (1 - Math.exp(-16 * dt));
       emitY += (input.y - emitY) * (1 - Math.exp(-16 * dt));
-      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis(0.045 * fr), 0.0072 * srcSize);
+      // denser dye on desktop so the cursor reads as a real interaction (mobile stays gentler)
+      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis((0.03 + 0.06 * srcSize) * fr), 0.0085 * srcSize);
       cursorActive = true;
     } else { emitX = input.x; emitY = input.y; cursorActive = false; }
     prevEmitX = emitX; prevEmitY = emitY;
