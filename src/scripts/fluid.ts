@@ -175,6 +175,7 @@ uniform vec2 uResolution;
 uniform float uReveal;
 uniform float uTime;
 uniform float uBloomAmt;
+uniform float uBlack;    // black-point lift: crush faint haze to the dark base (mobile)
 uniform vec2 uTextC;     // text-block centre (UV) — responsive
 uniform vec2 uTextR;     // text-block ellipse radii (UV) — responsive
 uniform float uTextDim;  // how much to thin the smoke over the text
@@ -188,6 +189,8 @@ void main(){
   vec3 n = normalize(vec3(r - l, t - b, length(uTexelDye) * 12.0));
   c *= 0.78 + 0.22 * clamp(dot(n, normalize(vec3(-0.4, 0.5, 1.0))), 0.0, 1.0);
   c += texture(uBloom, vUv).rgb * uBloomAmt;
+  // lift the black point so thin blue haze falls away to the dark base, dense smoke stays
+  c = max(c - uBlack, 0.0) / max(1.0 - uBlack, 1e-3);
   vec2 p = vUv - 0.5; p.x *= uResolution.x / uResolution.y;
   c *= smoothstep(1.35, 0.25, length(p));               // gentle vignette
   vec2 td = (vUv - uTextC) / uTextR;                     // soft elliptical region over the text block
@@ -301,7 +304,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   const gradP = prog(GRADSUB, { uPressure: { value: null }, uVelocity: { value: null }, uTexel: { value: texelSim } });
   const prefilter = prog(PREFILTER, { uTexture: { value: null }, uThreshold: { value: 0.20 }, uKnee: { value: 0.12 } });
   const blur = prog(BLUR, { uTexture: { value: null }, uDir: { value: [0, 0] } });
-  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 }, uTextC: { value: [0.2, 0.5] }, uTextR: { value: [0.34, 0.26] }, uTextDim: { value: 0.5 } });
+  const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 }, uBlack: { value: 0 }, uTextC: { value: [0.2, 0.5] }, uTextR: { value: [0.34, 0.26] }, uTextDim: { value: 0.5 } });
   const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 3.6 }, uScale: { value: 1.4 }, uAspect: { value: 1 }, uWindP: { value: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] }, uWindW: { value: [1, 0, 0] } });
 
   function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
@@ -324,12 +327,16 @@ function startSim(canvas: HTMLCanvasElement): void {
       display.u.uTextC.value = [0.5, 0.46];
       display.u.uTextR.value = [0.72, 0.34];
       display.u.uTextDim.value = 0.34;
+      display.u.uBloomAmt.value = 0.62;   // less glow spreading blue across the narrow frame
+      display.u.uBlack.value = 0.05;      // crush faint haze so the dark base reads
       srcSize = 0.58;
-      dyeMul = 0.58;
+      dyeMul = 0.52;
     } else {
       display.u.uTextC.value = [0.2, 0.5];
       display.u.uTextR.value = [0.34, 0.26];
       display.u.uTextDim.value = 0.5;
+      display.u.uBloomAmt.value = 1.0;
+      display.u.uBlack.value = 0;
       srcSize = 1;
       dyeMul = 1;
     }
