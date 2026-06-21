@@ -373,7 +373,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   for (let i = 0; i < 5; i++) WIND.push(buildWind(1));
   for (let i = 0; i < 3; i++) WIND.push(buildWind(2));
   for (let i = 0; i < 2; i++) WIND.push(buildWind(3));
-  const WIND_HOLD = 15, WIND_MORPH = 4;                 // seconds: time between transitions, time to morph
+  const WIND_HOLD = 10, WIND_MORPH = 4;                 // seconds: time between transitions, time to morph
   let windPrev = (Math.random() * WIND.length) | 0, windCur = windPrev, windT0 = 0;
   const windP = [0, 0, 0, 0, 0, 0];                     // flat vec2[3], mutated in place
   const windW = [0, 0, 0];
