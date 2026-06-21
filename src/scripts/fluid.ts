@@ -216,15 +216,28 @@ void main(){
   fragColor = vec4(texture(uSource, vUv).xyz + uColor * n * uAmt, 1.0);
 }`;
 
-// big, relaxed, divergence-free flow over the whole field (おおらか — broad eddies, not thin jets)
+// big, relaxed, divergence-free flow (おおらか — broad eddies) emanating from up to
+// three discrete wind sources, each a soft localized curl-noise swirl. The set of
+// sources (1/2/3 of them, at random positions) is chosen from 10 patterns and
+// smoothly morphed over time on the JS side.
 const FORCE = HEAD + HASH + NOISE + `
 uniform sampler2D uVelocity;
-uniform float uTime, uAmt, uScale;
+uniform float uTime, uAmt, uScale, uAspect;
+uniform vec2 uWindP[3];
+uniform float uWindW[3];
 void main(){
-  vec2 p = vUv * uScale + vec2(uTime * 0.013, uTime * 0.010);
-  float e = 0.07;
-  vec2 f = vec2(fbm(p + vec2(0.0, e)) - fbm(p - vec2(0.0, e)),
-             -(fbm(p + vec2(e, 0.0)) - fbm(p - vec2(e, 0.0)))) / (2.0 * e);
+  vec2 f = vec2(0.0);
+  for (int i = 0; i < 3; i++){
+    float w = uWindW[i];
+    if (w <= 0.001) continue;
+    vec2 d = vUv - uWindP[i]; d.x *= uAspect;
+    float fall = exp(-dot(d, d) * 1.8);                 // broad falloff around the source
+    vec2 p = (vUv - uWindP[i]) * uScale + vec2(uTime * 0.013, uTime * 0.010);
+    float e = 0.07;
+    vec2 cn = vec2(fbm(p + vec2(0.0, e)) - fbm(p - vec2(0.0, e)),
+               -(fbm(p + vec2(e, 0.0)) - fbm(p - vec2(e, 0.0)))) / (2.0 * e);
+    f += cn * w * fall;
+  }
   fragColor = vec4(texture(uVelocity, vUv).xy + f * uAmt, 0.0, 1.0);
 }`;
 
@@ -289,16 +302,19 @@ function startSim(canvas: HTMLCanvasElement): void {
   const prefilter = prog(PREFILTER, { uTexture: { value: null }, uThreshold: { value: 0.20 }, uKnee: { value: 0.12 } });
   const blur = prog(BLUR, { uTexture: { value: null }, uDir: { value: [0, 0] } });
   const display = prog(DISPLAY, { uDye: { value: null }, uBloom: { value: null }, uTexelDye: { value: texelDye }, uResolution: { value: [1, 1] }, uReveal: { value: 0 }, uTime: { value: 0 }, uBloomAmt: { value: 1.0 }, uTextC: { value: [0.2, 0.5] }, uTextR: { value: [0.34, 0.26] }, uTextDim: { value: 0.5 } });
-  const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 2.5 }, uScale: { value: 1.4 } });
+  const forceP = prog(FORCE, { uVelocity: { value: null }, uTime: { value: 0 }, uAmt: { value: 3.6 }, uScale: { value: 1.4 }, uAspect: { value: 1 }, uWindP: { value: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] }, uWindW: { value: [1, 0, 0] } });
 
   function pass(p: { mesh: Mesh }, target: RenderTarget | null) {
     renderer.render({ scene: p.mesh, target: target ?? undefined });
   }
+  // emission source-size factor: smaller on small / portrait screens
+  let srcSize = 1;
   function resize() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     canvas.style.width = '100%';
     canvas.style.height = '100%';
     display.u.uResolution.value = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+    forceP.u.uAspect.value = window.innerWidth / window.innerHeight;
     // keep the text legible: on narrow/portrait screens the hero text spans the full
     // width and stacks taller, so widen the thinned region, recentre it, and thin harder
     const portrait = window.innerWidth < 760 || window.innerHeight >= window.innerWidth;
@@ -306,10 +322,12 @@ function startSim(canvas: HTMLCanvasElement): void {
       display.u.uTextC.value = [0.5, 0.46];
       display.u.uTextR.value = [0.72, 0.34];
       display.u.uTextDim.value = 0.34;
+      srcSize = 0.58;
     } else {
       display.u.uTextC.value = [0.2, 0.5];
       display.u.uTextR.value = [0.34, 0.26];
       display.u.uTextDim.value = 0.5;
+      srcSize = 1;
     }
   }
 
@@ -317,14 +335,37 @@ function startSim(canvas: HTMLCanvasElement): void {
   // Ruri (lapis) blue only
   const LAPIS: [number, number, number] = [0.13, 0.26, 0.46];
   function lapis(j: number): [number, number, number] { return [LAPIS[0] * j, LAPIS[1] * j, LAPIS[2] * j]; }
-  // several big soft sources spread across the screen (even broad smoke, no gradient wash)
+  const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+  // several big soft sources spread across the screen (even broad smoke, no gradient wash).
+  // base positions are randomised per visit so the layout differs every load.
   const NE = 6;
-  const ebx = [0.20, 0.50, 0.80, 0.34, 0.68, 0.13];   // distributed across the whole screen
-  const eby = [0.34, 0.64, 0.26, 0.78, 0.70, 0.54];
-  const eph = [0.0, 1.1, 2.3, 3.5, 4.7, 5.9];
+  const ebx: number[] = [], eby: number[] = [], eph: number[] = [];
+  for (let i = 0; i < NE; i++) { ebx.push(rnd(0.12, 0.88)); eby.push(rnd(0.22, 0.80)); eph.push(Math.random() * Math.PI * 2); }
   const epx = ebx.slice(), epy = eby.slice();
   // the cursor adds one more local source when present
   let emitX = 0.5, emitY = 0.5, prevEmitX = 0.5, prevEmitY = 0.5, cursorActive = false;
+
+  // ---- wind: 10 patterns (1 source ×5, 2 sources ×3, 3 sources ×2), each at random
+  // positions, smoothly morphing to a new random pattern every 15s ----
+  type WindPattern = { p: [number, number][]; w: number[] };
+  function buildWind(n: number): WindPattern {
+    const base: [number, number] = [rnd(0.18, 0.82), rnd(0.24, 0.78)];
+    const p: [number, number][] = [], w: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      if (i < n) { p.push([rnd(0.15, 0.85), rnd(0.20, 0.80)]); w.push(1); }
+      else { p.push([base[0], base[1]]); w.push(0); }  // dormant slot parks on an active source so fade-ins don't sweep
+    }
+    return { p, w };
+  }
+  const WIND: WindPattern[] = [];
+  for (let i = 0; i < 5; i++) WIND.push(buildWind(1));
+  for (let i = 0; i < 3; i++) WIND.push(buildWind(2));
+  for (let i = 0; i < 2; i++) WIND.push(buildWind(3));
+  const WIND_HOLD = 15, WIND_MORPH = 4;                 // seconds: time between transitions, time to morph
+  let windPrev = (Math.random() * WIND.length) | 0, windCur = windPrev, windT0 = 0;
+  const windP = [0, 0, 0, 0, 0, 0];                     // flat vec2[3], mutated in place
+  const windW = [0, 0, 0];
+  forceP.u.uWindP.value = windP; forceP.u.uWindW.value = windW;
 
   const input = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, moved: false, down: false, tap: false, downX: 0, downY: 0, downT: 0, lastMove: -1e4 };
   const PT: [number, number] = [0, 0];
@@ -356,7 +397,22 @@ function startSim(canvas: HTMLCanvasElement): void {
     const T = (now - t0) / 1000;
 
     const fr = Math.min(dt * 60, 2);
-    // ---- a gentle, relaxed broad flow (おおらか) ----
+    // ---- wind: advance the 15s cycle and morph between the current/next pattern ----
+    if (T - windT0 >= WIND_HOLD) {
+      windT0 += WIND_HOLD;
+      windPrev = windCur;
+      let n = windCur; while (n === windCur) n = (Math.random() * WIND.length) | 0;
+      windCur = n;
+    }
+    const k = Math.min(1, (T - windT0) / WIND_MORPH);
+    const ease = k * k * (3 - 2 * k);
+    const wa = WIND[windPrev], wb = WIND[windCur];
+    for (let i = 0; i < 3; i++) {
+      windP[i * 2] = wa.p[i][0] + (wb.p[i][0] - wa.p[i][0]) * ease;
+      windP[i * 2 + 1] = wa.p[i][1] + (wb.p[i][1] - wa.p[i][1]) * ease;
+      windW[i] = wa.w[i] + (wb.w[i] - wa.w[i]) * ease;
+    }
+    // ---- a gentle, relaxed broad flow (おおらか) from the active wind sources ----
     forceP.u.uVelocity.value = velocity.read.texture; forceP.u.uTime.value = T; pass(forceP, velocity.write); velocity.swap();
     // ---- several big soft sources drifting across the screen → even broad smoke, no gradient wash ----
     for (let i = 0; i < NE; i++) {
@@ -364,7 +420,7 @@ function startSim(canvas: HTMLCanvasElement): void {
       const ey = eby[i] + 0.21 * Math.sin(T * 0.028 + eph[i]) + 0.09 * Math.sin(T * 0.048 + eph[i] * 1.3);
       const dvx = ex - epx[i], dvy = ey - epy[i];
       epx[i] = ex; epy[i] = ey;
-      doSplat(ex, ey, dvx * 2200 - dvy * 14, dvy * 2200 + dvx * 14, lapis(0.016 * fr), 0.026);  // big soft source, broad wind
+      doSplat(ex, ey, dvx * 2200 - dvy * 14, dvy * 2200 + dvx * 14, lapis(0.016 * fr), 0.021 * srcSize);  // soft source, broad wind
     }
     // ---- cursor: a big soft local source on top, only when present ----
     if ((now - input.lastMove) < 650) {
@@ -373,7 +429,7 @@ function startSim(canvas: HTMLCanvasElement): void {
       if (!cursorActive) { emitX = prevEmitX = input.x; emitY = prevEmitY = input.y; }
       emitX += (input.x - emitX) * (1 - Math.exp(-16 * dt));
       emitY += (input.y - emitY) * (1 - Math.exp(-16 * dt));
-      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis(0.07 * fr), 0.016);
+      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis(0.045 * fr), 0.0072 * srcSize);
       cursorActive = true;
     } else { emitX = input.x; emitY = input.y; cursorActive = false; }
     prevEmitX = emitX; prevEmitY = emitY;
