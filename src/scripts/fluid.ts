@@ -441,8 +441,9 @@ function startSim(canvas: HTMLCanvasElement): void {
       if (!cursorActive) { emitX = prevEmitX = input.x; emitY = prevEmitY = input.y; }
       emitX += (input.x - emitX) * (1 - Math.exp(-16 * dt));
       emitY += (input.y - emitY) * (1 - Math.exp(-16 * dt));
-      // denser dye on desktop so the cursor reads as a real interaction (mobile stays gentler)
-      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis((0.03 + 0.06 * srcSize) * fr), 0.0085 * srcSize);
+      // bright dye on the cursor so it crosses the bloom threshold and reads as a luminous,
+      // glowing trail — the main sense of interaction (mobile stays a touch gentler)
+      doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis((0.06 + 0.13 * srcSize) * fr), 0.0095 * srcSize);
       cursorActive = true;
     } else { emitX = input.x; emitY = input.y; cursorActive = false; }
     prevEmitX = emitX; prevEmitY = emitY;
