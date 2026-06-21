@@ -309,6 +309,8 @@ function startSim(canvas: HTMLCanvasElement): void {
   }
   // emission source-size factor: smaller on small / portrait screens
   let srcSize = 1;
+  // ambient-smoke dye factor: dimmer on portrait so the dark base shows through (less "all blue")
+  let dyeMul = 1;
   function resize() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     canvas.style.width = '100%';
@@ -323,11 +325,13 @@ function startSim(canvas: HTMLCanvasElement): void {
       display.u.uTextR.value = [0.72, 0.34];
       display.u.uTextDim.value = 0.34;
       srcSize = 0.58;
+      dyeMul = 0.58;
     } else {
       display.u.uTextC.value = [0.2, 0.5];
       display.u.uTextR.value = [0.34, 0.26];
       display.u.uTextDim.value = 0.5;
       srcSize = 1;
+      dyeMul = 1;
     }
   }
 
@@ -348,11 +352,12 @@ function startSim(canvas: HTMLCanvasElement): void {
   // ---- wind: 10 patterns (1 source ×5, 2 sources ×3, 3 sources ×2), each at random
   // positions, smoothly morphing to a new random pattern every 15s ----
   type WindPattern = { p: [number, number][]; w: number[] };
+  const WIND_SPEEDS = [1.0, 0.66, 0.42];               // each source picks one: current speed is the max
   function buildWind(n: number): WindPattern {
     const base: [number, number] = [rnd(0.18, 0.82), rnd(0.24, 0.78)];
     const p: [number, number][] = [], w: number[] = [];
     for (let i = 0; i < 3; i++) {
-      if (i < n) { p.push([rnd(0.15, 0.85), rnd(0.20, 0.80)]); w.push(1); }
+      if (i < n) { p.push([rnd(0.15, 0.85), rnd(0.20, 0.80)]); w.push(WIND_SPEEDS[(Math.random() * 3) | 0]); }
       else { p.push([base[0], base[1]]); w.push(0); }  // dormant slot parks on an active source so fade-ins don't sweep
     }
     return { p, w };
@@ -420,7 +425,7 @@ function startSim(canvas: HTMLCanvasElement): void {
       const ey = eby[i] + 0.21 * Math.sin(T * 0.028 + eph[i]) + 0.09 * Math.sin(T * 0.048 + eph[i] * 1.3);
       const dvx = ex - epx[i], dvy = ey - epy[i];
       epx[i] = ex; epy[i] = ey;
-      doSplat(ex, ey, dvx * 2200 - dvy * 14, dvy * 2200 + dvx * 14, lapis(0.016 * fr), 0.021 * srcSize);  // soft source, broad wind
+      doSplat(ex, ey, dvx * 2200 - dvy * 14, dvy * 2200 + dvx * 14, lapis(0.016 * fr * dyeMul), 0.021 * srcSize);  // soft source, broad wind
     }
     // ---- cursor: a big soft local source on top, only when present ----
     if ((now - input.lastMove) < 650) {
