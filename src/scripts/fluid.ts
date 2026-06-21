@@ -324,7 +324,7 @@ function startSim(canvas: HTMLCanvasElement): void {
   const eph = [0.0, 1.1, 2.3, 3.5, 4.7, 5.9];
   const epx = ebx.slice(), epy = eby.slice();
   // the cursor adds one more local source when present
-  let emitX = 0.5, emitY = 0.5, prevEmitX = 0.5, prevEmitY = 0.5;
+  let emitX = 0.5, emitY = 0.5, prevEmitX = 0.5, prevEmitY = 0.5, cursorActive = false;
 
   const input = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, moved: false, down: false, tap: false, downX: 0, downY: 0, downT: 0, lastMove: -1e4 };
   const PT: [number, number] = [0, 0];
@@ -368,10 +368,14 @@ function startSim(canvas: HTMLCanvasElement): void {
     }
     // ---- cursor: a big soft local source on top, only when present ----
     if ((now - input.lastMove) < 650) {
+      // on re-appearance from idle, teleport the source to the cursor (zero velocity)
+      // so it doesn't streak across the screen catching up from its last position
+      if (!cursorActive) { emitX = prevEmitX = input.x; emitY = prevEmitY = input.y; }
       emitX += (input.x - emitX) * (1 - Math.exp(-16 * dt));
       emitY += (input.y - emitY) * (1 - Math.exp(-16 * dt));
       doSplat(emitX, emitY, (emitX - prevEmitX) * SPLAT_FORCE, (emitY - prevEmitY) * SPLAT_FORCE, lapis(0.07 * fr), 0.016);
-    } else { emitX = input.x; emitY = input.y; }
+      cursorActive = true;
+    } else { emitX = input.x; emitY = input.y; cursorActive = false; }
     prevEmitX = emitX; prevEmitY = emitY;
     input.moved = false;
 
